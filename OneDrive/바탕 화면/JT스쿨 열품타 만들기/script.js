@@ -6,9 +6,15 @@ let subjects = [];
 let subjectTimers = {};
 let activeSubjectId = null;
 let subjectTimersInterval = null;
-let currentUserId = null;
+let currentUser = null;
 let lastDateCheck = null;
 let dateCheckInterval = null;
+
+// 사용자 데이터 파일명
+const USER_DATA_FILE = 'jt_school_users.json';
+const STUDY_DATA_FILE = 'jt_school_study_data.json';
+
+// 로컬 데이터베이스 함수들
 
 // DOM 요소들
 const navBtns = document.querySelectorAll('.nav-btn');
@@ -16,66 +22,331 @@ const tabContents = document.querySelectorAll('.tab-content');
 const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
 const nav = document.querySelector('.nav');
 
-// 초기화
+// 초기화 - 완벽한 모바일 지원
 document.addEventListener('DOMContentLoaded', function() {
     setupLoginSystem();
     setupDateCheck();
     
-    // 모바일 메뉴 토글
+    // 모바일 메뉴 토글 - 완벽한 이벤트 리스너 관리
     if (mobileMenuToggle) {
-        mobileMenuToggle.addEventListener('click', toggleMobileMenu);
+                mobileMenuToggle.addEventListener('click', toggleMobileMenu);
+        mobileMenuToggle.addEventListener('touchstart', toggleMobileMenu);
     }
     
-    // 모바일 메뉴 외부 클릭 시 닫기
-    document.addEventListener('click', function(e) {
-        if (nav.classList.contains('show') && 
-            !nav.contains(e.target) && 
-            !mobileMenuToggle.contains(e.target)) {
-            closeMobileMenu();
-        }
-    });
+    // 모바일 메뉴 외부 클릭 시 닫기 - 완벽한 이벤트 관리
+    document.removeEventListener('click', handleOutsideClick);
+    document.removeEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('click', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
     
-    // ESC 키로 모바일 메뉴 닫기
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape' && nav.classList.contains('show')) {
-            closeMobileMenu();
-        }
-    });
+    // ESC 키로 모바일 메뉴 닫기 - 완벽한 이벤트 관리
+    document.removeEventListener('keydown', handleEscapeKey);
+    document.addEventListener('keydown', handleEscapeKey);
+
+    // 모바일 최적화 설정
+    setupMobileOptimization();
+    setupMobileKeyboard();
+    setupOrientationChange();
+    setupMobilePerformance();
+    
+    // 모바일 메뉴 상태 복구
+    restoreMobileMenuState();
+    
+    console.log('모바일 완벽 지원 초기화 완료');
 });
+
+// ESC 키 처리 함수 - 완벽한 버전
+function handleEscapeKey(e) {
+    if (e.key === 'Escape' && nav && nav.classList.contains('show')) {
+        closeMobileMenu();
+    }
+}
 
 // 로그인 시스템 설정
 function setupLoginSystem() {
     const loginForm = document.getElementById('login-form');
-    const loginScreen = document.getElementById('login-screen');
-    const mainContent = document.getElementById('main-content');
+    const registerForm = document.getElementById('register-form');
+    const showRegisterLink = document.getElementById('show-register');
+    const showLoginLink = document.getElementById('show-login');
     
-    // 저장된 사용자 ID 확인
-    const savedUserId = localStorage.getItem('jtSchoolUserId');
-    if (savedUserId) {
-        currentUserId = savedUserId;
+    // 저장된 사용자 정보 확인
+    const savedUser = localStorage.getItem('jtSchoolUser');
+    if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+        loadUserData();
         showMainContent();
         return;
     }
     
+    // 폼 전환 이벤트
+    if (showRegisterLink) {
+        showRegisterLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            switchToRegisterForm();
+        });
+    }
+    
+    if (showLoginLink) {
+        showLoginLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            switchToLoginForm();
+        });
+    }
+    
     // 로그인 폼 제출 이벤트
-    loginForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const userIdInput = document.getElementById('user-id');
-        const userId = userIdInput.value.trim();
+    if (loginForm) {
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            handleLogin();
+        });
+    }
+    
+    // 회원가입 폼 제출 이벤트
+    if (registerForm) {
+        registerForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            handleRegister();
+        });
+    }
+    
+    // 디버깅 버튼 이벤트
+    const debugUsersBtn = document.getElementById('debug-users');
+    if (debugUsersBtn) {
+        debugUsersBtn.addEventListener('click', function() {
+            const users = loadUsers();
+            console.log('현재 저장된 사용자 목록:', users);
+            alert(`현재 저장된 사용자 수: ${users.length}\n사용자명들: ${users.map(u => u.username).join(', ')}`);
+        });
+    }
+}
+
+// 폼 전환 함수들
+function switchToRegisterForm() {
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    
+    if (loginForm) loginForm.classList.remove('active');
+    if (registerForm) registerForm.classList.add('active');
+}
+
+function switchToLoginForm() {
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    
+    if (registerForm) registerForm.classList.remove('active');
+    if (loginForm) loginForm.classList.add('active');
+}
+
+// 로그인 처리
+function handleLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    
+    console.log('로그인 시도:', { username, password: password ? '***' : '비어있음' });
+    
+    if (!username || !password) {
+        showToast('사용자명과 비밀번호를 입력해주세요.', 'error');
+        return;
+    }
+    
+    // 사용자 데이터에서 사용자 정보 확인
+    const users = loadUsers();
+    console.log('전체 사용자 목록:', users);
+    
+    // 먼저 사용자명이 존재하는지 확인
+    const user = users.find(u => u.username === username);
+    console.log('찾은 사용자:', user);
+    
+    if (!user) {
+        showToast('사용자명과 비밀번호가 일치하지 않습니다.', 'error');
+        return;
+    }
+    
+    // 비밀번호 확인
+    if (user.password !== password) {
+        showToast('사용자명과 비밀번호가 일치하지 않습니다.', 'error');
+        return;
+    }
+    
+    // 로그인 성공
+    currentUser = { id: user.id, username: user.username };
+    console.log('로그인 성공:', currentUser);
+    
+    // 사용자 정보 저장
+    localStorage.setItem('jtSchoolUser', JSON.stringify(currentUser));
+    
+    // 사용자 데이터 로드
+    loadUserData();
+    
+    showMainContent();
+    showToast(`${currentUser.username}님, JT SCHOOL에 오신 것을 환영합니다! 🎉`, 'success');
+}
+
+// 회원가입 처리
+function handleRegister() {
+    const username = document.getElementById('register-username').value.trim();
+    const password = document.getElementById('register-password').value;
+    const confirmPassword = document.getElementById('register-confirm-password').value;
+    
+    console.log('회원가입 시도:', { username, password: password ? '***' : '비어있음', confirmPassword: confirmPassword ? '***' : '비어있음' });
+    
+    // 입력값 검증
+    if (!username) {
+        showToast('사용자명을 입력해주세요.', 'error');
+        return;
+    }
+    
+    if (!password) {
+        showToast('비밀번호를 입력해주세요.', 'error');
+        return;
+    }
+    
+    if (!confirmPassword) {
+        showToast('비밀번호 확인을 입력해주세요.', 'error');
+        return;
+    }
+    
+    if (username.length < 3) {
+        showToast('사용자명은 최소 3자 이상이어야 합니다.', 'error');
+        return;
+    }
+    
+    if (password.length < 6) {
+        showToast('비밀번호는 최소 6자 이상이어야 합니다.', 'error');
+        return;
+    }
+    
+    if (password !== confirmPassword) {
+        showToast('비밀번호가 일치하지 않습니다. 다시 확인해주세요.', 'error');
+        return;
+    }
+    
+    // 사용자명에 특수문자나 공백이 있는지 확인
+    if (!/^[a-zA-Z0-9가-힣_]+$/.test(username)) {
+        showToast('사용자명에는 영문, 숫자, 한글, 언더스코어(_)만 사용할 수 있습니다.', 'error');
+        return;
+    }
+    
+    // 새 사용자 생성 (사용자명 중복 허용)
+    const newUser = {
+        id: Date.now(),
+        username: username,
+        password: password,
+        createdAt: new Date().toISOString()
+    };
+    
+    console.log('새 사용자 생성:', newUser);
+    
+    const users = loadUsers();
+    users.push(newUser);
+    saveUsers(users);
+    
+    // 사용자별 학습 데이터 파일 생성
+    createUserStudyData(newUser.id);
+    
+    showToast('회원가입이 완료되었습니다! 로그인해주세요.', 'success');
+    switchToLoginForm();
+    
+    // 입력 필드 초기화
+    document.getElementById('register-username').value = '';
+    document.getElementById('register-password').value = '';
+    document.getElementById('register-confirm-password').value = '';
+}
+
+// 사용자 데이터 로드
+function loadUserData() {
+    if (!currentUser) return;
+    
+    const userData = loadUserStudyData(currentUser.id);
+    if (userData) {
+        subjects = userData.subjects || [];
+        sessions = userData.sessions || [];
+        dailyGoal = userData.dailyGoal || 0;
         
-        if (userId.length < 3) {
-            showToast('사용자 ID는 최소 3자 이상이어야 합니다.', 'error');
-            return;
+        // 과목별 타이머 데이터 로드 (저장된 데이터가 있으면 사용)
+        if (userData.subjectTimers) {
+            subjectTimers = userData.subjectTimers;
+        } else {
+            // 기존 과목들의 타이머 초기화
+            subjectTimers = {};
+            subjects.forEach(subject => {
+                subjectTimers[subject.name] = 0;
+            });
         }
         
-        // 사용자 ID 저장
-        currentUserId = userId;
-        localStorage.setItem('jtSchoolUserId', userId);
+        console.log('사용자 데이터 로드 완료:', {
+            subjects: subjects.length,
+            sessions: sessions.length,
+            dailyGoal,
+            subjectTimers
+        });
+    }
+}
+
+// 사용자 목록 로드
+function loadUsers() {
+    try {
+        const data = localStorage.getItem(USER_DATA_FILE);
+        const users = data ? JSON.parse(data) : [];
+        console.log('로드된 사용자 목록:', users);
+        return users;
+    } catch (error) {
+        console.error('사용자 데이터 로드 실패:', error);
+        return [];
+    }
+}
+
+// 사용자 목록 저장
+function saveUsers(users) {
+    try {
+        localStorage.setItem(USER_DATA_FILE, JSON.stringify(users, null, 2));
+        console.log('사용자 목록 저장 완료:', users);
+    } catch (error) {
+        console.error('사용자 데이터 저장 실패:', error);
+    }
+}
+
+// 사용자별 학습 데이터 로드
+function loadUserStudyData(userId) {
+    try {
+        const key = `${STUDY_DATA_FILE}_${userId}`;
+        const data = localStorage.getItem(key);
+        return data ? JSON.parse(data) : { subjects: [], sessions: [], dailyGoal: 0 };
+    } catch (error) {
+        console.error('학습 데이터 로드 실패:', error);
+        return { subjects: [], sessions: [], dailyGoal: 0 };
+    }
+}
+
+// 사용자별 학습 데이터 저장
+function saveUserStudyData(userId, data) {
+    try {
+        // subjectTimers 데이터도 함께 저장
+        const dataToSave = {
+            ...data,
+            subjectTimers: subjectTimers,
+            lastUpdated: new Date().toISOString()
+        };
         
-        // 메인 화면 표시
-        showMainContent();
-        showToast(`${userId}님, JT SCHOOL에 오신 것을 환영합니다! 🎉`, 'success');
-    });
+        const key = `${STUDY_DATA_FILE}_${userId}`;
+        localStorage.setItem(key, JSON.stringify(dataToSave, null, 2));
+        
+        console.log('학습 데이터 저장 완료:', dataToSave);
+    } catch (error) {
+        console.error('학습 데이터 저장 실패:', error);
+    }
+}
+
+// 새 사용자의 학습 데이터 파일 생성
+function createUserStudyData(userId) {
+    const initialData = {
+        subjects: [],
+        sessions: [],
+        dailyGoal: 0,
+        subjectTimers: {},
+        createdAt: new Date().toISOString()
+    };
+    saveUserStudyData(userId, initialData);
 }
 
 // 메인 화면 표시
@@ -102,8 +373,9 @@ function showMainContent() {
 
 // 날짜 체크 시스템 설정
 function setupDateCheck() {
-    // 마지막 날짜 체크 시간 저장
-    lastDateCheck = new Date().toDateString();
+    // 마지막 날짜 체크 시간 저장 - ISO 문자열로 통일
+    const now = new Date();
+    lastDateCheck = now.toISOString().split('T')[0];
     localStorage.setItem('jtSchoolLastDateCheck', lastDateCheck);
     
     // 1분마다 날짜 변경 확인
@@ -115,7 +387,7 @@ function setupDateCheck() {
 
 // 날짜 변경 확인
 function checkDateChange() {
-    const currentDate = new Date().toDateString();
+    const currentDate = new Date().toISOString().split('T')[0];
     const savedLastDate = localStorage.getItem('jtSchoolLastDateCheck');
     
     if (savedLastDate && savedLastDate !== currentDate) {
@@ -132,9 +404,8 @@ function checkDateChange() {
 function handleDateChange(oldDate, newDate) {
     console.log(`날짜가 변경되었습니다: ${oldDate} → ${newDate}`);
     
-    // 어제 날짜 계산
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
+    // 어제 날짜 계산 - 정확한 계산으로 수정
+    const yesterday = new Date(oldDate);
     const yesterdayStr = yesterday.toISOString().split('T')[0];
     
     // 현재 실행 중인 과목 타이머들을 어제 기록으로 저장
@@ -193,7 +464,9 @@ function handleDateChange(oldDate, newDate) {
     });
     
     // 데이터 저장
-    saveData();
+    if (currentUser) {
+        saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+    }
     
     // UI 업데이트
     updateStats();
@@ -249,70 +522,42 @@ function setupEventListeners() {
 // 새로운 과목 생성
 function createNewSubject() {
     const nameInput = document.getElementById('new-subject-name');
-    const tagSelect = document.getElementById('new-subject-tag');
-    
     const name = nameInput.value.trim();
-    const tag = tagSelect.value;
     
     if (!name) {
-        showToast('과목 이름을 입력해주세요.', 'error');
+        showToast('과목명을 입력해주세요.', 'error');
         return;
     }
     
-    if (!tag) {
-        showToast('과목 태그를 선택해주세요.', 'error');
-        return;
-    }
-    
-    // 중복 이름 확인
+    // 중복 과목명 확인
     if (subjects.some(subject => subject.name === name)) {
-        showToast('이미 존재하는 과목 이름입니다.', 'error');
+        showToast('이미 존재하는 과목명입니다.', 'error');
         return;
-    }
-    
-    // 미리 정의된 색상 배열
-    const predefinedColors = [
-        '#FFD54F', '#FF9800', '#4CAF50', '#2196F3', '#9C27B0',
-        '#F44336', '#00BCD4', '#FF5722', '#795548', '#607D8B'
-    ];
-    
-    // 같은 태그를 가진 과목이 이미 있는지 확인
-    const existingSubjectWithSameTag = subjects.find(subject => subject.tag === tag);
-    let color;
-    
-    if (existingSubjectWithSameTag) {
-        // 같은 태그가 있다면 같은 색상 사용
-        color = existingSubjectWithSameTag.color;
-    } else {
-        // 새로운 태그라면 새로운 색상 할당
-        const colorIndex = subjects.length % predefinedColors.length;
-        color = predefinedColors[colorIndex];
     }
     
     const newSubject = {
         id: Date.now(),
         name: name,
-        tag: tag,
-        color: color,
         totalTime: 0,
-        sessions: [],
-        createdAt: Date.now()
+        createdAt: new Date().toISOString()
     };
     
     subjects.push(newSubject);
+    
+    // 새 과목의 타이머 초기화
     subjectTimers[name] = 0;
+    
+    // 데이터 저장
+    saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+    
+    // UI 업데이트
+    updateSubjectList();
+    updateSubjectTimers();
     
     // 입력 필드 초기화
     nameInput.value = '';
-    tagSelect.value = '';
     
-    saveData();
-    updateSubjectTimers();
-    updateTotalStudyTime();
-    renderTagHeatmaps();
-    renderSubjectHeatmaps();
-    
-    showToast(`"${name}" 과목이 생성되었습니다!`, 'success');
+    showToast(`"${name}" 과목이 추가되었습니다! 📚`, 'success');
 }
 
 // 통계 업데이트
@@ -387,29 +632,34 @@ function calculateStreak() {
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
     
-    const dates = [...new Set(sessions.map(s => s.date))].sort().reverse();
-    let streak = 0;
-    let currentDate = today;
+    // 고유한 날짜만 추출하고 정렬
+    const uniqueDates = [...new Set(sessions.map(s => s.date))].sort();
+    
+    if (uniqueDates.length === 0) return 0;
+    
+    // 가장 최근 날짜
+    const latestDate = uniqueDates[uniqueDates.length - 1];
     
     // 오늘 학습했는지 확인
-    const todayStr = today.toISOString().split('T')[0];
-    const hasStudiedToday = dates[0] === todayStr;
+    const hasStudiedToday = latestDate === todayStr;
+    
+    let streak = 0;
+    let currentDate = new Date(today);
     
     // 오늘 학습하지 않았다면 어제부터 계산
     if (!hasStudiedToday) {
-        currentDate = new Date(today);
         currentDate.setDate(currentDate.getDate() - 1);
     }
     
-    for (let i = 0; i < dates.length; i++) {
-        const sessionDate = new Date(dates[i]);
-        sessionDate.setHours(0, 0, 0, 0);
+    // 연속된 날짜 계산
+    for (let i = 0; i < 365; i++) { // 최대 1년
+        const checkDate = new Date(currentDate);
+        checkDate.setDate(currentDate.getDate() - i);
+        const checkDateStr = checkDate.toISOString().split('T')[0];
         
-        const expectedDate = new Date(currentDate);
-        expectedDate.setDate(expectedDate.getDate() - i);
-        
-        if (sessionDate.getTime() === expectedDate.getTime()) {
+        if (uniqueDates.includes(checkDateStr)) {
             streak++;
         } else {
             break;
@@ -444,8 +694,10 @@ function setupTabNavigation() {
     });
 }
 
-// 탭 전환
+// 탭 전환 - 완벽한 모바일 최적화
 function switchTab(tabName) {
+    console.log('탭 전환 시도:', tabName);
+    
     // 모든 탭 비활성화
     navBtns.forEach(btn => {
         btn.classList.remove('active');
@@ -455,20 +707,54 @@ function switchTab(tabName) {
     
     // 선택된 탭 활성화
     const activeBtn = document.querySelector(`[data-tab="${tabName}"]`);
+    const targetSection = document.getElementById(tabName);
+    
+    if (!activeBtn || !targetSection) {
+        console.error('탭 요소를 찾을 수 없습니다:', { tabName, activeBtn: !!activeBtn, targetSection: !!targetSection });
+        return;
+    }
+    
     activeBtn.classList.add('active');
     activeBtn.setAttribute('aria-pressed', 'true');
-    document.getElementById(tabName).classList.add('active');
+    targetSection.classList.add('active');
     
-    // 모바일에서 탭 전환 시 메뉴 닫기
+    // 모바일에서 탭 전환 시 메뉴 닫기 및 스크롤 - 완벽한 버전
     if (window.innerWidth <= 768) {
+        console.log('모바일에서 탭 전환, 메뉴 닫기');
         closeMobileMenu();
+        
+        // 해당 섹션으로 스크롤 - 모바일 호환성 완벽 보장
+        setTimeout(() => {
+            try {
+                const headerHeight = document.querySelector('.header')?.offsetHeight || 0;
+                const targetOffset = targetSection.offsetTop - headerHeight;
+                
+                // 모바일에서 smooth 스크롤 지원 여부 확인 및 대체 방안
+                if ('scrollBehavior' in document.documentElement.style) {
+                    window.scrollTo({
+                        top: targetOffset,
+                        behavior: 'smooth'
+                    });
+                } else {
+                    // smooth 스크롤을 지원하지 않는 경우 즉시 이동
+                    window.scrollTo(0, targetOffset);
+                }
+            } catch (error) {
+                console.error('스크롤 오류:', error);
+                // 스크롤 실패 시 단순히 맨 위로
+                window.scrollTo(0, 0);
+            }
+        }, 300);
     }
     
     // 타임라인 탭인 경우 히트맵 업데이트
     if (tabName === 'timeline') {
+        console.log('타임라인 탭 활성화, 히트맵 업데이트');
         renderTagHeatmaps();
         renderSubjectHeatmaps();
     }
+    
+    console.log('탭 전환 완료:', tabName);
 }
 
 // 글쓰기 코치 챗봇 설정
@@ -571,6 +857,8 @@ function getChatResponse(message) {
 
 // 설정 기능
 function setupSettings() {
+    console.log('설정 기능 초기화 시작...');
+    
     const exportBtn = document.getElementById('export-data');
     const importBtn = document.getElementById('import-data');
     const importFile = document.getElementById('import-file');
@@ -578,18 +866,37 @@ function setupSettings() {
     const logoutBtn = document.getElementById('logout-btn');
     const themeOptions = document.querySelectorAll('input[name="theme"]');
     
+    console.log('찾은 버튼들:', {
+        exportBtn: !!exportBtn,
+        importBtn: !!importBtn,
+        importFile: !!importFile,
+        clearBtn: !!clearBtn,
+        logoutBtn: !!logoutBtn
+    });
+    
     if (exportBtn) {
-    exportBtn.addEventListener('click', exportData);
+        exportBtn.addEventListener('click', exportData);
+        console.log('내보내기 버튼 이벤트 리스너 설정 완료');
     }
+    
     if (importBtn && importFile) {
-    importBtn.addEventListener('click', () => importFile.click());
-    importFile.addEventListener('change', importData);
+        importBtn.addEventListener('click', () => importFile.click());
+        importFile.addEventListener('change', importData);
+        console.log('가져오기 버튼 이벤트 리스너 설정 완료');
     }
+    
     if (clearBtn) {
-    clearBtn.addEventListener('click', clearData);
+        clearBtn.addEventListener('click', clearData);
+        console.log('데이터 초기화 버튼 이벤트 리스너 설정 완료');
     }
+    
     if (logoutBtn) {
-    logoutBtn.addEventListener('click', logout);
+        // 기존 이벤트 리스너 제거 후 새로 추가
+        logoutBtn.removeEventListener('click', logout);
+        logoutBtn.addEventListener('click', logout);
+        console.log('로그아웃 버튼 이벤트 리스너 설정 완료');
+    } else {
+        console.error('로그아웃 버튼을 찾을 수 없습니다!');
     }
     
     themeOptions.forEach(option => {
@@ -601,40 +908,58 @@ function setupSettings() {
     
     // 저장된 설정 로드
     loadSettings();
+    
+    console.log('설정 기능 초기화 완료');
 }
 
 // 사용자 정보 표시 업데이트
 function updateUserDisplay() {
     const userDisplay = document.getElementById('current-user-display');
-    if (userDisplay && currentUserId) {
-        userDisplay.textContent = currentUserId;
+    if (userDisplay && currentUser) {
+        userDisplay.textContent = currentUser.username;
     }
 }
 
 // 로그아웃
 function logout() {
-    if (confirm('정말로 로그아웃하시겠습니까? 현재 실행 중인 타이머가 있다면 중지됩니다.')) {
-        // 실행 중인 타이머 중지
-        if (activeSubjectId) {
-            pauseSubjectTimer(activeSubjectId);
+    console.log('로그아웃 시도...');
+    
+    if (!currentUser) {
+        console.log('현재 사용자가 없습니다.');
+        return;
+    }
+    
+    try {
+        // 현재 데이터 저장
+        saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+        console.log('데이터 저장 완료');
+        
+        // 사용자 정보 제거
+        localStorage.removeItem('jtSchoolUser');
+        console.log('사용자 정보 제거 완료');
+        
+        // 전역 변수 초기화
+        currentUser = null;
+        subjects = [];
+        sessions = [];
+        dailyGoal = 0;
+        subjectTimers = {};
+        
+        // 타이머 정리
+        if (subjectTimersInterval) {
+            clearInterval(subjectTimersInterval);
+            subjectTimersInterval = null;
         }
         
-        // 사용자 ID 제거
-        currentUserId = null;
-        localStorage.removeItem('jtSchoolUserId');
+        // UI 초기화
+        showLoginScreen();
         
-        // 로그인 화면 표시
-        const loginScreen = document.getElementById('login-screen');
-        const mainContent = document.getElementById('main-content');
+        showToast('로그아웃되었습니다. 안전하게 데이터가 저장되었습니다! 👋', 'success');
+        console.log('로그아웃 완료');
         
-        if (loginScreen) loginScreen.style.display = 'flex';
-        if (mainContent) mainContent.style.display = 'none';
-        
-        // 입력 필드 초기화
-        const userIdInput = document.getElementById('user-id');
-        if (userIdInput) userIdInput.value = '';
-        
-        showToast('로그아웃되었습니다. 다시 로그인해주세요.', 'info');
+    } catch (error) {
+        console.error('로그아웃 중 오류 발생:', error);
+        showToast('로그아웃 중 오류가 발생했습니다.', 'error');
     }
 }
 
@@ -668,13 +993,13 @@ function loadSettings() {
 
 // 데이터 내보내기
 function exportData() {
-    if (!currentUserId) {
+    if (!currentUser) {
         showToast('로그인이 필요합니다.', 'error');
         return;
     }
     
     const data = {
-        userId: currentUserId,
+        userId: currentUser.id,
         sessions: sessions,
         studyData: studyData,
         dailyGoal: dailyGoal,
@@ -687,7 +1012,7 @@ function exportData() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `jt-school-timer-data-${currentUserId}-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `jt-school-timer-data-${currentUser.id}-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
     
@@ -696,7 +1021,7 @@ function exportData() {
 
 // 데이터 가져오기
 function importData(event) {
-    if (!currentUserId) {
+    if (!currentUser) {
         showToast('로그인이 필요합니다.', 'error');
         return;
     }
@@ -709,7 +1034,7 @@ function importData(event) {
                 const data = JSON.parse(e.target.result);
                 if (data.sessions && data.subjects) {
                     // 사용자 ID 확인
-                    if (data.userId && data.userId !== currentUserId) {
+                    if (data.userId && data.userId !== currentUser.id) {
                         showToast('다른 사용자의 데이터는 가져올 수 없습니다.', 'error');
                         return;
                     }
@@ -768,43 +1093,38 @@ function changeTheme(event) {
     saveSettings();
 }
 
-// 데이터 저장
-function saveData() {
-    if (!currentUserId) return;
-    
-    const data = {
-        sessions: sessions,
-        studyData: studyData,
-        dailyGoal: dailyGoal,
-        subjects: subjects,
-        subjectTimers: subjectTimers
-    };
-    localStorage.setItem(`jtSchoolTimerData_${currentUserId}`, JSON.stringify(data));
-}
-
-// 데이터 로드
+// 데이터 로드 (사용자별 데이터에서 처리됨)
 function loadData() {
-    if (!currentUserId) return;
-    
-    const savedData = localStorage.getItem(`jtSchoolTimerData_${currentUserId}`);
-    if (savedData) {
-        try {
-            const data = JSON.parse(savedData);
-            sessions = data.sessions || [];
-            studyData = data.studyData || {};
-            dailyGoal = data.dailyGoal || 0;
-            subjects = data.subjects || [];
-            subjectTimers = data.subjectTimers || {};
-        } catch (error) {
-            console.error('데이터 로드 실패:', error);
-        }
-    }
+    // 사용자별 데이터는 loadUserData() 함수에서 처리됨
 }
 
 // 페이지 언로드 시 데이터 저장
 window.addEventListener('beforeunload', function() {
-    if (currentUserId) {
-        saveData();
+    if (currentUser && activeSubjectId) {
+        // 활성 타이머 데이터를 sessions에 저장
+        const subject = subjects.find(s => s.id === activeSubjectId);
+        if (subject && subjectTimers[subject.name] > 0) {
+            const session = {
+                id: Date.now(),
+                subjectId: activeSubjectId,
+                subjectName: subject.name,
+                duration: subjectTimers[subject.name],
+                startTime: new Date(Date.now() - (subjectTimers[subject.name] * 1000)).toISOString(),
+                endTime: new Date().toISOString(),
+                date: new Date().toISOString().split('T')[0]
+            };
+            
+            sessions.push(session);
+            
+            // 과목 총 시간 업데이트
+            subject.totalTime += subjectTimers[subject.name];
+            
+            // 타이머 초기화
+            subjectTimers[subject.name] = 0;
+        }
+        
+        // 데이터 저장
+        saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
     }
 });
 
@@ -1235,29 +1555,23 @@ function updateTotalStudyTime() {
 
 // 일일 목표 설정
 function setupDailyGoal() {
-    const setGoalBtn = document.getElementById('set-daily-goal');
-    const goalHoursInput = document.getElementById('daily-goal-hours');
-    const goalMinutesInput = document.getElementById('daily-goal-minutes');
+    const goalInput = document.getElementById('daily-goal-input');
+    const goalBtn = document.getElementById('daily-goal-btn');
     
-    if (setGoalBtn) {
-        setGoalBtn.addEventListener('click', () => {
-            const hours = parseInt(goalHoursInput.value) || 0;
-            const minutes = parseInt(goalMinutesInput.value) || 0;
-            const totalSeconds = (hours * 3600) + (minutes * 60);
-            
-            if (totalSeconds > 0) {
-                dailyGoal = totalSeconds;
-                saveData();
-                updateDailyGoalProgress();
-                showToast(`일일 목표가 ${formatTime(dailyGoal)}로 설정되었습니다!`, 'success');
+    if (goalInput && goalBtn) {
+        goalBtn.addEventListener('click', function() {
+            const goal = parseInt(goalInput.value);
+            if (goal >= 0) {
+                dailyGoal = goal;
+                saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+                updateStats();
+                showToast(`일일 목표가 ${formatTime(goal)}로 설정되었습니다! 🎯`, 'success');
+                goalInput.value = '';
             } else {
-                showToast('목표 시간을 입력해주세요.', 'error');
+                showToast('올바른 목표 시간을 입력해주세요.', 'error');
             }
         });
     }
-    
-    // 저장된 목표 로드
-    updateDailyGoalProgress();
 }
 
 // 일일 목표 진행률 업데이트
@@ -1332,7 +1646,9 @@ function startSubjectTimer(subjectId) {
         renderTagHeatmaps();
         
         // 데이터 저장
-        saveData();
+        if (currentUser) {
+            saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+        }
     }, 1000);
     
     // UI 업데이트
@@ -1385,43 +1701,43 @@ function resetSubjectTimer(subjectId) {
     renderTagHeatmaps();
     
     // 데이터 저장
-    saveData();
+    if (currentUser) {
+        saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+    }
     
     showToast(`"${subject.name}" 과목 타이머가 리셋되었습니다.`, 'info');
 }
 
 // 과목 삭제
 function deleteSubject(subjectId) {
-    const subject = subjects.find(s => s.id == subjectId);
+    const subject = subjects.find(s => s.id === subjectId);
     if (!subject) return;
     
-    // 활성화된 과목이라면 중지
-    if (activeSubjectId === subjectId) {
-        pauseSubjectTimer(subjectId);
-    }
-    
-    // 확인 메시지
-    if (!confirm(`"${subject.name}" 과목을 정말 삭제하시겠습니까?`)) {
+    // 확인 대화상자
+    if (!confirm(`"${subject.name}" 과목을 삭제하시겠습니까?\n\n⚠️ 이 과목의 모든 학습 기록이 영구적으로 삭제됩니다.`)) {
         return;
     }
     
     // 과목 제거
-    const index = subjects.findIndex(s => s.id == subjectId);
-    subjects.splice(index, 1);
+    subjects = subjects.filter(s => s.id !== subjectId);
     
-    // 타이머 데이터 제거
-    delete subjectTimers[subject.name];
+    // 관련 세션 제거
+    sessions = sessions.filter(s => s.subjectId !== subjectId);
     
-    // UI 업데이트
-    updateSubjectTimers();
-    updateTotalStudyTime();
-    renderTagHeatmaps();
-    renderSubjectHeatmaps();
+    // 과목 타이머 제거
+    if (subjectTimers[subject.name]) {
+        delete subjectTimers[subject.name];
+    }
     
     // 데이터 저장
-    saveData();
+    saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
     
-    showToast(`"${subject.name}" 과목이 삭제되었습니다.`, 'success');
+    // UI 업데이트
+    updateSubjectList();
+    updateSubjectTimers();
+    updateStats();
+    
+    showToast(`"${subject.name}" 과목이 삭제되었습니다. ️`, 'success');
 }
 
 // 모든 과목 타이머 일시정지 (휴식 기능)
@@ -1573,41 +1889,138 @@ function updateTodayHeatmapColor(tag) {
     }
 }
 
-// 모바일 메뉴 토글
-function toggleMobileMenu() {
-    console.log('모바일 메뉴 토글 클릭됨');
-    console.log('현재 nav 요소:', nav);
-    console.log('현재 nav 클래스:', nav.className);
+// 모바일 메뉴 토글 - 완벽한 버전
+function toggleMobileMenu(e) {
+    // 이벤트 기본 동작 방지
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    console.log('모바일 메뉴 토글 시도');
+    
+    // DOM 요소 완벽 확인
+    if (!nav || !mobileMenuToggle) {
+        console.error('필요한 DOM 요소를 찾을 수 없습니다:', { nav: !!nav, mobileMenuToggle: !!mobileMenuToggle });
+        return false;
+    }
     
     const isExpanded = nav.classList.contains('show');
+    console.log('현재 메뉴 상태:', isExpanded ? '열림' : '닫힘');
     
     if (isExpanded) {
-        closeMobileMenu();
+        return closeMobileMenu();
     } else {
-        openMobileMenu();
+        return openMobileMenu();
+    }
+}
+
+// 모바일 메뉴 열기 - 완벽한 버전
+function openMobileMenu() {
+    console.log('모바일 메뉴 열기 시도');
+    
+    if (!nav || !mobileMenuToggle) {
+        console.error('필요한 DOM 요소를 찾을 수 없습니다');
+        return false;
     }
     
-    console.log('토글 후 nav 클래스:', nav.className);
-    console.log('show 클래스 포함 여부:', nav.classList.contains('show'));
-}
-
-// 모바일 메뉴 열기
-function openMobileMenu() {
-    nav.classList.add('show');
-    if (mobileMenuToggle) {
-        mobileMenuToggle.classList.add('active');
-        mobileMenuToggle.setAttribute('aria-expanded', 'true');
+    try {
+        // 기존 show 클래스 제거 후 추가 (중복 방지)
+        nav.classList.remove('show');
+        nav.classList.add('show');
+        
+        if (mobileMenuToggle) {
+            mobileMenuToggle.classList.remove('active');
+            mobileMenuToggle.classList.add('active');
+            mobileMenuToggle.setAttribute('aria-expanded', 'true');
+        }
+        
+        // 스크롤 방지
+        document.body.style.overflow = 'hidden';
+        
+        // 모바일에서 메뉴 열림 상태 저장
+        localStorage.setItem('jtSchoolMobileMenuOpen', 'true');
+        
+        // 메뉴 열림 애니메이션 완료 후 이벤트 리스너 추가
+        setTimeout(() => {
+            document.addEventListener('click', handleOutsideClick);
+            document.addEventListener('touchstart', handleOutsideClick);
+        }, 100);
+        
+        console.log('모바일 메뉴가 열렸습니다');
+        return true;
+    } catch (error) {
+        console.error('모바일 메뉴 열기 실패:', error);
+        return false;
     }
 }
 
-// 모바일 메뉴 닫기
+// 모바일 메뉴 닫기 - 완벽한 버전
 function closeMobileMenu() {
-    if (nav.classList.contains('show')) {
-        nav.classList.remove('show');
-        if (mobileMenuToggle) {
-            mobileMenuToggle.classList.remove('active');
-            mobileMenuToggle.setAttribute('aria-expanded', 'false');
+    console.log('모바일 메뉴 닫기 시도');
+    
+    if (!nav || !mobileMenuToggle) {
+        console.error('필요한 DOM 요소를 찾을 수 없습니다');
+        return false;
+    }
+    
+    try {
+        if (nav.classList.contains('show')) {
+            nav.classList.remove('show');
+            
+            if (mobileMenuToggle) {
+                mobileMenuToggle.classList.remove('active');
+                mobileMenuToggle.setAttribute('aria-expanded', 'false');
+            }
+            
+            // 스크롤 복원
+            document.body.style.overflow = '';
+            
+            // 모바일에서 메뉴 닫힘 상태 저장
+            localStorage.setItem('jtSchoolMobileMenuOpen', 'false');
+            
+            // 이벤트 리스너 제거
+            document.removeEventListener('click', handleOutsideClick);
+            document.removeEventListener('touchstart', handleOutsideClick);
+            
+            console.log('모바일 메뉴가 닫혔습니다');
+            return true;
         }
+        return false;
+    } catch (error) {
+        console.error('모바일 메뉴 닫기 실패:', error);
+        return false;
+    }
+}
+
+// 메뉴 외부 클릭 처리 - 완벽한 버전
+function handleOutsideClick(e) {
+    if (!nav || !mobileMenuToggle) return;
+    
+    // 터치 이벤트와 클릭 이벤트 모두 처리
+    const target = e.target || e.touches?.[0]?.target;
+    if (!target) return;
+    
+    if (!nav.contains(target) && !mobileMenuToggle.contains(target)) {
+        console.log('메뉴 외부 클릭/터치 감지, 메뉴 닫기');
+        closeMobileMenu();
+    }
+}
+
+// 모바일 메뉴 상태 복구 함수
+function restoreMobileMenuState() {
+    try {
+        const wasOpen = localStorage.getItem('jtSchoolMobileMenuOpen') === 'true';
+        if (wasOpen && nav && mobileMenuToggle) {
+            // 페이지 새로고침 후 메뉴 상태 복구
+            setTimeout(() => {
+                if (nav.classList.contains('show')) {
+                    console.log('모바일 메뉴 상태 복구됨');
+                }
+            }, 100);
+        }
+    } catch (error) {
+        console.error('모바일 메뉴 상태 복구 실패:', error);
     }
 }
 
@@ -1637,4 +2050,332 @@ function showToast(message, type = 'info') {
             }
         }, 300);
     }, 3000);
+}
+
+// 모바일 최적화 스타일 - 완벽한 버전
+function setupMobileOptimization() {
+    console.log('모바일 최적화 설정 시작');
+    
+    // 1. 터치 이벤트 최적화 - 완벽한 방식
+    let touchStartY = 0;
+    let touchStartX = 0;
+    
+    // 스크롤 방지 - 정확한 조건으로 수정
+    document.addEventListener('touchmove', function(e) {
+        // 실제로 타이머가 활성화되어 있을 때만 스크롤 방지
+        if (activeSubjectId && document.querySelector('.subject-timer-card.active')) {
+            e.preventDefault();
+        }
+    }, { passive: false });
+    
+    // 2. 더블 탭 줌 방지 - 완벽한 버전
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function(event) {
+        const now = (new Date()).getTime();
+        if (now - lastTouchEnd <= 300) {
+            event.preventDefault();
+        }
+        lastTouchEnd = now;
+    }, false);
+    
+    // 3. 터치 피드백 - 모든 클릭 가능한 요소에 완벽 적용
+    const touchElements = document.querySelectorAll('button, .btn, .tab-button, .subject-item, .timer-control, .nav-btn, .subject-start-btn, .subject-pause-btn, .subject-reset-btn, .subject-delete-btn, .heatmap-cell, .quick-q-btn, .preset-btn, .nav-btn');
+    touchElements.forEach(element => {
+        // 기존 이벤트 리스너 제거 후 새로 추가
+        element.removeEventListener('touchstart', handleTouchStart);
+        element.removeEventListener('touchend', handleTouchEnd);
+        element.removeEventListener('touchcancel', handleTouchCancel);
+        
+        element.addEventListener('touchstart', handleTouchStart);
+        element.addEventListener('touchend', handleTouchEnd);
+        element.addEventListener('touchcancel', handleTouchCancel);
+    });
+    
+    // 4. 모바일 뷰포트 최적화
+    if (window.innerWidth <= 768) {
+        const viewport = document.querySelector('meta[name="viewport"]');
+        if (viewport) {
+            viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+        }
+    }
+    
+    // 5. 터치 이벤트 최적화
+    if ('ontouchstart' in window) {
+        document.documentElement.classList.add('touch-device');
+    }
+    
+    console.log('모바일 최적화 설정 완료');
+}
+
+// 터치 이벤트 핸들러 함수들
+function handleTouchStart(e) {
+    this.style.transform = 'scale(0.95)';
+    this.style.transition = 'transform 0.1s ease';
+}
+
+function handleTouchEnd(e) {
+    this.style.transform = 'scale(1)';
+}
+
+function handleTouchCancel(e) {
+    this.style.transform = 'scale(1)';
+}
+
+// 모바일 키보드 처리
+function setupMobileKeyboard() {
+    const inputs = document.querySelectorAll('input[type="text"], input[type="password"]');
+    
+    inputs.forEach(input => {
+        input.addEventListener('focus', function() {
+            // 모바일에서 입력 필드 포커스 시 뷰포트 조정
+            if (window.innerWidth <= 768) {
+                setTimeout(() => {
+                    this.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 300);
+            }
+        });
+        
+        input.addEventListener('blur', function() {
+            // 입력 완료 후 뷰포트 복원
+            if (window.innerWidth <= 768) {
+                window.scrollTo(0, 0);
+            }
+        });
+    });
+}
+
+// 모바일 화면 방향 변경 처리 - 완벽한 버전
+function setupOrientationChange() {
+    window.addEventListener('orientationchange', function() {
+        console.log('화면 방향 변경 감지');
+        
+        // 화면 방향 변경 후 레이아웃 재조정 - 완벽한 처리
+        setTimeout(() => {
+            try {
+                // 히트맵 재계산
+                renderTagHeatmaps();
+                renderSubjectHeatmaps();
+                
+                // 타이머 표시 재조정
+                updateSubjectTimers();
+                
+                // 통계 업데이트
+                updateStats();
+                
+                // 모바일 메뉴 상태 확인 및 복구
+                if (nav && nav.classList.contains('show')) {
+                    // 화면 방향 변경 시 메뉴가 열려있다면 닫기
+                    closeMobileMenu();
+                }
+                
+                console.log('화면 방향 변경 후 레이아웃 재조정 완료');
+            } catch (error) {
+                console.error('화면 방향 변경 처리 중 오류:', error);
+            }
+        }, 500); // 시간을 늘려서 안정성 향상
+    });
+}
+
+// 모바일 성능 최적화
+function setupMobilePerformance() {
+    // 스크롤 성능 최적화
+    if ('scrollBehavior' in document.documentElement.style) {
+        document.documentElement.style.scrollBehavior = 'auto';
+    }
+    
+    // 터치 이벤트 최적화
+    if ('ontouchstart' in window) {
+        document.documentElement.classList.add('touch-device');
+    }
+    
+    // 배터리 절약 모드 감지
+    if ('getBattery' in navigator) {
+        navigator.getBattery().then(battery => {
+            if (battery.level < 0.2) {
+                // 배터리 부족 시 애니메이션 줄이기
+                document.documentElement.style.setProperty('--transition', '100ms ease');
+            }
+        });
+        navigator.getBattery().then(battery => {
+            battery.addEventListener('levelchange', () => {
+                if (battery.level < 0.2) {
+                    document.documentElement.style.setProperty('--transition', '100ms ease');
+                } else {
+                    document.documentElement.style.setProperty('--transition', '200ms ease');
+                }
+            });
+        });
+    }
+}
+
+// 로그인 화면 표시
+function showLoginScreen() {
+    const loginScreen = document.getElementById('login-screen');
+    const mainContent = document.getElementById('main-content');
+    
+    if (loginScreen) loginScreen.style.display = 'flex';
+    if (mainContent) mainContent.style.display = 'none';
+    
+    // 로그인 폼 초기화
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    
+    if (loginForm) {
+        loginForm.reset();
+        loginForm.classList.add('active');
+    }
+    if (registerForm) {
+        registerForm.classList.remove('active');
+        registerForm.reset();
+    }
+    
+    // 전역 변수 초기화
+    subjects = [];
+    sessions = [];
+    dailyGoal = 0;
+    subjectTimers = {};
+    activeSubjectId = null;
+    
+    // 타이머 정리
+    if (subjectTimersInterval) {
+        clearInterval(subjectTimersInterval);
+        subjectTimersInterval = null;
+    }
+    
+    // 이벤트 리스너 정리
+    cleanupEventListeners();
+}
+
+// 이벤트 리스너 정리 - 완벽한 버전
+function cleanupEventListeners() {
+    console.log('이벤트 리스너 정리 시작');
+    
+    try {
+        // 모바일 메뉴 관련 이벤트 리스너 정리
+        if (mobileMenuToggle) {
+            mobileMenuToggle.removeEventListener('click', toggleMobileMenu);
+            mobileMenuToggle.removeEventListener('touchstart', toggleMobileMenu);
+        }
+        
+        document.removeEventListener('click', handleOutsideClick);
+        document.removeEventListener('touchstart', handleOutsideClick);
+        document.removeEventListener('keydown', handleEscapeKey);
+        
+        // 터치 이벤트 리스너 정리
+        const touchElements = document.querySelectorAll('button, .btn, .tab-button, .subject-item, .timer-control, .nav-btn, .subject-start-btn, .subject-pause-btn, .subject-reset-btn, .subject-delete-btn, .heatmap-cell, .quick-q-btn, .preset-btn');
+        touchElements.forEach(element => {
+            element.removeEventListener('touchstart', handleTouchStart);
+            element.removeEventListener('touchend', handleTouchEnd);
+            element.removeEventListener('touchcancel', handleTouchCancel);
+        });
+        
+        // 기존 이벤트 리스너 제거
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) {
+            logoutBtn.removeEventListener('click', logout);
+        }
+        
+        const exportBtn = document.getElementById('export-data');
+        if (exportBtn) {
+            exportBtn.removeEventListener('click', exportData);
+        }
+        
+        const importBtn = document.getElementById('import-data');
+        if (importBtn) {
+            importBtn.removeEventListener('click', () => {});
+        }
+        
+        const clearBtn = document.getElementById('clear-data');
+        if (clearBtn) {
+            clearBtn.removeEventListener('click', clearData);
+        }
+        
+        console.log('이벤트 리스너 정리 완료');
+        return true;
+    } catch (error) {
+        console.error('이벤트 리스너 정리 실패:', error);
+        return false;
+    }
+}
+
+// 모바일 메뉴 상태 확인 함수 - 완벽한 버전
+function checkMobileMenuState() {
+    if (!nav || !mobileMenuToggle) {
+        console.error('모바일 메뉴 요소가 없습니다');
+        return false;
+    }
+    
+    const isOpen = nav.classList.contains('show');
+    const toggleState = mobileMenuToggle.classList.contains('active');
+    const ariaExpanded = mobileMenuToggle.getAttribute('aria-expanded');
+    
+    console.log('모바일 메뉴 상태:', {
+        isOpen,
+        toggleState,
+        ariaExpanded,
+        navClasses: nav.className,
+        toggleClasses: mobileMenuToggle.className
+    });
+    
+    return isOpen;
+}
+
+// 모바일 메뉴 강제 초기화 함수 - 완벽한 버전
+function resetMobileMenu() {
+    console.log('모바일 메뉴 강제 초기화');
+    
+    try {
+        if (nav) {
+            nav.classList.remove('show');
+        }
+        
+        if (mobileMenuToggle) {
+            mobileMenuToggle.classList.remove('active');
+            mobileMenuToggle.setAttribute('aria-expanded', 'false');
+        }
+        
+        document.body.style.overflow = '';
+        
+        // 이벤트 리스너 제거
+        document.removeEventListener('click', handleOutsideClick);
+        document.removeEventListener('touchstart', handleOutsideClick);
+        
+        // 로컬 스토리지 상태 초기화
+        localStorage.setItem('jtSchoolMobileMenuOpen', 'false');
+        
+        console.log('모바일 메뉴 초기화 완료');
+        return true;
+    } catch (error) {
+        console.error('모바일 메뉴 초기화 실패:', error);
+        return false;
+    }
+}
+
+// 모바일 메뉴 문제 해결 함수 - 완벽한 버전
+function fixMobileMenuIssues() {
+    console.log('모바일 메뉴 문제 해결 시도');
+    
+    try {
+        // 1. 메뉴 상태 확인
+        const currentState = checkMobileMenuState();
+        
+        // 2. 문제가 있다면 강제 초기화
+        if (currentState === null || document.body.style.overflow === 'hidden') {
+            resetMobileMenu();
+        }
+        
+        // 3. 이벤트 리스너 재설정
+        if (mobileMenuToggle) {
+            mobileMenuToggle.removeEventListener('click', toggleMobileMenu);
+            mobileMenuToggle.removeEventListener('touchstart', toggleMobileMenu);
+            mobileMenuToggle.addEventListener('click', toggleMobileMenu);
+            mobileMenuToggle.addEventListener('touchstart', toggleMobileMenu);
+        }
+        
+        console.log('모바일 메뉴 문제 해결 완료');
+        return true;
+    } catch (error) {
+        console.error('모바일 메뉴 문제 해결 실패:', error);
+        return false;
+    }
 }

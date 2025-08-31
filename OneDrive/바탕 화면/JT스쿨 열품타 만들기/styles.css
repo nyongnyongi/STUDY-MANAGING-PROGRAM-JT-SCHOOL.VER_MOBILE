@@ -1,8 +1,30 @@
+/* 모바일 최적화 */
+html {
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
 /* 기본 설정 */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+/* 입력 필드만 텍스트 선택 허용 */
+input, textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
 }
 
 :root {
@@ -167,6 +189,48 @@ body {
 
 .login-btn:active {
     transform: translateY(0);
+}
+
+/* 회원가입 폼 */
+.register-form {
+    display: none;
+}
+
+.register-form.active {
+    display: block;
+}
+
+.login-form.active {
+    display: block;
+}
+
+.login-form:not(.active) {
+    display: none;
+}
+
+/* 폼 전환 링크 */
+.form-switch {
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+    color: var(--color-subtext);
+}
+
+.form-switch a {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.form-switch a:hover {
+    text-decoration: underline;
+}
+
+/* 폼 제목 */
+.login-form h3,
+.register-form h3 {
+    color: var(--color-text);
+    margin-bottom: 1.5rem;
+    font-size: 1.3rem;
 }
 
 /* 모바일 메뉴 토글 */
@@ -1603,38 +1667,55 @@ body {
         gap: 1rem;
         padding: 1rem;
         position: relative;
+        min-height: 60px;  /* 헤더 최소 높이 추가 */
     }
     
     .nav {
-        justify-content: center;
-        display: none;
-        position: absolute;
-        top: 100%;
+        width: 100%;  /* 전체 너비 사용 */
+        margin-top: 1rem;  /* 상단 여백 추가 */
+        position: fixed;  /* 고정 위치로 변경 */
+        top: 60px;  /* 헤더 높이만큼 아래로 */
         left: 0;
         right: 0;
         background: var(--color-surface);
         border: 1px solid var(--color-border);
-        border-radius: var(--border-radius);
+        border-radius: 0;  /* 전체 너비를 위해 radius 제거 */
         box-shadow: var(--shadow-medium);
         z-index: 999;
-        padding: 1rem;
+        padding: 0.5rem;
         flex-direction: column;
         gap: 0.5rem;
+        transform: translateY(-100%);  /* -150%에서 -100%로 수정 */
+        transition: transform 0.3s ease;  /* 부드러운 전환 효과 */
+        display: flex;  /* 항상 flex로 표시 */
+        opacity: 0;  /* 기본적으로 투명 */
+        pointer-events: none;  /* 기본적으로 클릭 불가 */
     }
     
     .nav.show {
-        display: flex;
-        animation: slideDown 0.3s ease;
+        transform: translateY(0);  /* 메뉴 표시 */
+        opacity: 1;  /* 표시될 때 불투명 */
+        pointer-events: auto;  /* 클릭 가능하게 */
     }
     
     .nav-btn {
-        padding: 0.75rem 1rem;
-        font-size: 0.9rem;
         width: 100%;
+        padding: 1rem;
+        margin: 0;
         text-align: center;
-        border-radius: var(--border-radius);
-        border: 1px solid transparent;
-        transition: var(--transition);
+        border-radius: 0;  /* 버튼 radius 제거 */
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface);  /* 배경색 추가 */
+        color: var(--color-text);  /* 텍스트 색상 추가 */
+    }
+    
+    .nav-btn:last-child {
+        border-bottom: none;
+    }
+    
+    .nav-btn.active {
+        background: var(--color-accent);
+        color: white;
     }
     
     .nav-btn:hover,
@@ -1656,12 +1737,47 @@ body {
     }
     
     .main {
-        padding: 0 1rem;
+        padding: 0;
         margin: 1rem auto;
+        width: 100%;
+        max-width: 100%;
     }
     
-    .timer-container {
-        padding: 2rem 1rem;
+    .timer-container,
+    .timeline-container,
+    .coach-container,
+    .settings-container {
+        margin: 0 1rem;
+        width: calc(100% - 2rem);
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+    }
+    
+    .subject-timer-card,
+    .tag-heatmap-card,
+    .subject-heatmap-card {
+        width: 100%;
+        margin: 0 0 1rem 0;
+        padding: 1rem;
+    }
+    
+    .subject-controls {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .subject-controls button {
+        width: 100%;
+        margin: 0;
+    }
+    
+    /* 히트맵 스크롤 개선 */
+    .tag-heatmap-grid,
+    .heatmap-grid {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;  /* iOS 스크롤 개선 */
+        padding: 1rem 0.5rem;
+        margin: 0 -0.5rem;  /* 네거티브 마진으로 패딩 상쇄 */
     }
     
     .time {
@@ -1784,12 +1900,41 @@ body {
         font-size: 1.5rem;
     }
     
-    .timer-container {
-        padding: 1.5rem 1rem;
+    .timer-container,
+    .timeline-container,
+    .coach-container,
+    .settings-container {
+        margin: 0 0.5rem;
+        width: calc(100% - 1rem);
+        padding: 1rem;
     }
     
-    .timeline-container, .coach-container, .settings-container {
-        padding: 1.5rem 1rem;
+    .subject-controls button {
+        font-size: 0.9rem;
+        padding: 0.75rem;
+    }
+    
+    /* 입력 필드 최적화 */
+    input[type="text"],
+    input[type="number"],
+    select {
+        font-size: 16px;  /* iOS에서 자동 확대 방지 */
+    }
+    
+    /* 작은 화면에서 폼 최적화 */
+    .subject-create-form {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .goal-input-group {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .goal-input-group input {
+        width: 100%;
+        text-align: center;
     }
     
     /* 작은 화면에서 히트맵 최적화 */
@@ -2265,4 +2410,364 @@ body {
     font-size: 0.9rem;
     text-align: center;
     font-style: italic;
+}
+
+/* 모바일 터치 최적화 */
+button, .btn, .tab-button, .subject-item, .timer-control {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 터치 피드백 효과 */
+button:active, .btn:active, .tab-button:active, .subject-item:active, .timer-control:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease;
+}
+
+/* 모바일 반응형 레이아웃 */
+@media (max-width: 768px) {
+    :root {
+        --font-size-base: 14px;
+        --border-radius: 8px;
+        --max-width: 100%;
+    }
+    
+    .login-container {
+        padding: 2rem 1.5rem;
+        margin: 1rem;
+        width: calc(100% - 2rem);
+    }
+    
+    .login-header .mascot {
+        font-size: 3rem;
+    }
+    
+    .main-container {
+        padding: 1rem;
+    }
+    
+    .header {
+        padding: 1rem;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .tab-container {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .tab-button {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+        min-height: 48px;
+    }
+    
+    .timer-display {
+        font-size: 2.5rem;
+        padding: 2rem 1rem;
+    }
+    
+    .timer-controls {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: center;
+    }
+    
+    .timer-control {
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+        min-width: 120px;
+        min-height: 48px;
+    }
+    
+    .subject-list {
+        gap: 0.75rem;
+    }
+    
+    .subject-item {
+        padding: 1rem;
+        min-height: 60px;
+    }
+    
+    .subject-name {
+        font-size: 1rem;
+    }
+    
+    .subject-time {
+        font-size: 0.9rem;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .stats-card {
+        padding: 1rem;
+    }
+    
+    .stats-card h3 {
+        font-size: 1.1rem;
+    }
+    
+    .stats-card .value {
+        font-size: 1.5rem;
+    }
+    
+    .heatmap {
+        gap: 2px;
+    }
+    
+    .heatmap-day {
+        width: 20px;
+        height: 20px;
+        font-size: 0.7rem;
+    }
+    
+    .form-group {
+        margin-bottom: 1rem;
+    }
+    
+    .form-group input {
+        padding: 0.75rem;
+        font-size: 1rem;
+        min-height: 48px;
+    }
+    
+    .form-group button {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        min-height: 48px;
+    }
+    
+    .toast {
+        bottom: 1rem;
+        left: 1rem;
+        right: 1rem;
+        width: auto;
+        max-width: none;
+    }
+}
+
+/* 작은 모바일 화면 */
+@media (max-width: 480px) {
+    .login-container {
+        padding: 1.5rem 1rem;
+    }
+    
+    .login-header .mascot {
+        font-size: 2.5rem;
+    }
+    
+    .main-container {
+        padding: 0.75rem;
+    }
+    
+    .header {
+        padding: 0.75rem;
+    }
+    
+    .header h1 {
+        font-size: 1.3rem;
+    }
+    
+    .timer-display {
+        font-size: 2rem;
+        padding: 1.5rem 0.75rem;
+    }
+    
+    .timer-control {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        min-width: 100px;
+    }
+    
+    .subject-item {
+        padding: 0.75rem;
+    }
+    
+    .stats-card {
+        padding: 0.75rem;
+    }
+    
+    .heatmap-day {
+        width: 18px;
+        height: 18px;
+        font-size: 0.6rem;
+    }
+}
+
+/* 가로 모드 최적화 */
+@media (max-height: 500px) and (orientation: landscape) {
+    .login-container {
+        padding: 1rem;
+        margin: 0.5rem;
+    }
+    
+    .login-header .mascot {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .header {
+        padding: 0.5rem 1rem;
+    }
+    
+    .timer-display {
+        padding: 1rem;
+        font-size: 1.8rem;
+    }
+    
+    .timer-controls {
+        gap: 0.5rem;
+    }
+    
+    .timer-control {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
+/* 터치 디바이스 최적화 */
+@media (hover: none) and (pointer: coarse) {
+    .subject-item:hover,
+    .tab-button:hover,
+    .timer-control:hover {
+        transform: none;
+    }
+    
+    .subject-item:active,
+    .tab-button:active,
+    .timer-control:active {
+        transform: scale(0.95);
+    }
+}
+
+/* 고해상도 디스플레이 최적화 */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    .btn, .tab-button, .subject-item, .timer-control {
+        border-width: 0.5px;
+    }
+}
+
+/* 모바일 터치 최적화 */
+.touch-device .subject-item,
+.touch-device .tab-button,
+.touch-device .timer-control {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.touch-device .subject-item:active,
+.touch-device .tab-button:active,
+.touch-device .timer-control:active {
+    background-color: var(--color-accent);
+    color: white;
+    transform: scale(0.98);
+}
+
+/* 모바일 스크롤바 숨기기 */
+.touch-device ::-webkit-scrollbar {
+    display: none;
+}
+
+.touch-device {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* 모바일 포커스 스타일 */
+.touch-device button:focus,
+.touch-device input:focus,
+.touch-device .tab-button:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.3);
+}
+
+/* 모바일 입력 필드 최적화 */
+.touch-device input[type="text"],
+.touch-device input[type="password"] {
+    font-size: 16px; /* iOS에서 줌 방지 */
+    -webkit-appearance: none;
+    border-radius: var(--border-radius);
+}
+
+/* 모바일 버튼 터치 영역 확대 */
+.touch-device .btn,
+.touch-device .tab-button,
+.touch-device .timer-control {
+    position: relative;
+}
+
+.touch-device .btn::before,
+.touch-device .tab-button::before,
+.touch-device .timer-control::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    right: -10px;
+    bottom: -10px;
+    z-index: -1;
+}
+
+/* 모바일 히트맵 최적화 */
+@media (max-width: 480px) {
+    .heatmap {
+        justify-content: center;
+        gap: 1px;
+    }
+    
+    .heatmap-day {
+        width: 16px;
+        height: 16px;
+        font-size: 0.5rem;
+        line-height: 16px;
+    }
+}
+
+/* 모바일 타이머 표시 최적화 */
+@media (max-width: 768px) {
+    .timer-display {
+        word-break: keep-all;
+        line-height: 1.2;
+    }
+    
+    .timer-display .time {
+        display: block;
+        margin: 0.2rem 0;
+    }
+}
+
+/* 모바일 폼 최적화 */
+@media (max-width: 768px) {
+    .form-group {
+        position: relative;
+    }
+    
+    .form-group input:focus + label,
+    .form-group input:not(:placeholder-shown) + label {
+        transform: translateY(-1.5rem) scale(0.8);
+        color: var(--color-accent);
+    }
+    
+    .form-group label {
+        position: absolute;
+        top: 50%;
+        left: 0.75rem;
+        transform: translateY(-50%);
+        transition: all 0.2s ease;
+        pointer-events: none;
+        color: var(--color-subtext);
+    }
 }
