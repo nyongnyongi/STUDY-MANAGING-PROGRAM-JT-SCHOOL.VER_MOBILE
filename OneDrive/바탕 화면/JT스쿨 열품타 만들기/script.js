@@ -10,9 +10,111 @@ let currentUser = null;
 let lastDateCheck = null;
 let dateCheckInterval = null;
 
+// 세션 유지 관련 변수
+let isPaused = false; // 일시정지 상태 플래그
+
+// 제미나이 API 설정
+let GEMINI_API_KEY = localStorage.getItem('jtSchoolGeminiAPIKey') || 'AIzaSyBvQZvQZvQZvQZvQZvQZvQZvQZvQZvQZvQ'; // 기본값
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+
 // 사용자 데이터 파일명
 const USER_DATA_FILE = 'jt_school_users.json';
 const STUDY_DATA_FILE = 'jt_school_study_data.json';
+
+// 세션 유지 관련 함수들
+
+// 타이머 상태를 localStorage에 저장
+function saveTimerSession() {
+    if (!currentUser || !activeSubjectId) return;
+    
+    const subject = subjects.find(s => s.id === activeSubjectId);
+    if (!subject) return;
+    
+    const sessionData = {
+        activeSubjectId: activeSubjectId,
+        subjectName: subject.name,
+        totalTime: subjectTimers[subject.name] || 0,
+        lastTimestamp: new Date().getTime(),
+        isPaused: isPaused,
+        userId: currentUser.id
+    };
+    
+    localStorage.setItem('studySession', JSON.stringify(sessionData));
+    console.log('타이머 세션 저장됨:', sessionData);
+}
+
+// localStorage에서 타이머 상태 복원
+function restoreTimerSession() {
+    try {
+        const sessionData = localStorage.getItem('studySession');
+        if (!sessionData) return false;
+        
+        const session = JSON.parse(sessionData);
+        
+        // 사용자 ID 확인
+        if (session.userId !== currentUser.id) {
+            console.log('다른 사용자의 세션 데이터, 무시');
+            return false;
+        }
+        
+        // 자리를 비운 시간 계산
+        const now = new Date().getTime();
+        const timeAway = Math.floor((now - session.lastTimestamp) / 1000);
+        
+        console.log('세션 복원 시도:', {
+            subjectName: session.subjectName,
+            totalTime: session.totalTime,
+            timeAway: timeAway,
+            isPaused: session.isPaused
+        });
+        
+        // 일시정지 상태가 아니었다면 자리를 비운 시간을 추가
+        if (!session.isPaused && timeAway > 0) {
+            const subject = subjects.find(s => s.name === session.subjectName);
+            if (subject) {
+                subjectTimers[subject.name] = session.totalTime + timeAway;
+                activeSubjectId = subject.id;
+                isPaused = false;
+                
+                console.log(`세션 복원 완료: ${session.subjectName}, 추가된 시간: ${timeAway}초`);
+                return true;
+            }
+        } else if (session.isPaused) {
+            // 일시정지 상태였다면 시간은 추가하지 않고 상태만 복원
+            const subject = subjects.find(s => s.name === session.subjectName);
+            if (subject) {
+                subjectTimers[subject.name] = session.totalTime;
+                activeSubjectId = subject.id;
+                isPaused = true;
+                
+                console.log(`일시정지된 세션 복원: ${session.subjectName}`);
+                return true;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('세션 복원 실패:', error);
+        return false;
+    }
+}
+
+// 세션 데이터 삭제
+function clearTimerSession() {
+    localStorage.removeItem('studySession');
+    console.log('타이머 세션 데이터 삭제됨');
+}
+
+// 자리를 비운 시간이 너무 길면 경고
+function checkTimeAway(session) {
+    const now = new Date().getTime();
+    const timeAway = Math.floor((now - session.lastTimestamp) / 1000);
+    const hoursAway = Math.floor(timeAway / 3600);
+    
+    if (hoursAway > 24) {
+        showToast(`자리를 비운 시간이 ${hoursAway}시간입니다. 타이머를 확인해주세요.`, 'info');
+    }
+}
 
 // 로컬 데이터베이스 함수들
 
@@ -26,6 +128,12 @@ const nav = document.querySelector('.nav');
 document.addEventListener('DOMContentLoaded', function() {
     setupLoginSystem();
     setupDateCheck();
+    
+    // 페이지 로드 시 날짜 변경 확인만 (과도한 초기화 제거)
+    console.log('🚀 페이지 로드 시 날짜 변경 확인');
+    setTimeout(() => {
+        checkDateChange();
+    }, 1000);
     
     // 모바일 메뉴 토글 - 완벽한 이벤트 리스너 관리
     if (mobileMenuToggle) {
@@ -364,11 +472,25 @@ function showMainContent() {
     setupChatBot();
     setupSettings();
     setupDailyGoal();
+    
+    // 날짜 변경 확인 (중요!)
+    console.log('🔄 메인 컨텐츠 표시 시 날짜 변경 확인');
+    checkDateChange();
+    
     updateStats();
     updateSubjectTimers();
     updateTotalStudyTime();
     renderTagHeatmaps();
     renderSubjectHeatmaps();
+    
+    // 세션 복원 시도 (임시로 비활성화)
+    // setTimeout(() => {
+    //     try {
+    //         restoreTimerSession();
+    //     } catch (error) {
+    //         console.error('세션 복원 중 오류:', error);
+    //     }
+    // }, 2000);
 }
 
 // 날짜 체크 시스템 설정
@@ -387,12 +509,39 @@ function setupDateCheck() {
 
 // 날짜 변경 확인
 function checkDateChange() {
-    const currentDate = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    
+    // 한국 시간 기준으로 날짜 계산 (UTC + 9시간)
+    const koreanTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    const currentDate = koreanTime.toISOString().split('T')[0];
+    
     const savedLastDate = localStorage.getItem('jtSchoolLastDateCheck');
     
-    if (savedLastDate && savedLastDate !== currentDate) {
+    console.log('🔍 날짜 체크 (한국 시간 기준):', { 
+        currentDate, 
+        savedLastDate, 
+        isDifferent: savedLastDate !== currentDate,
+        currentUser: currentUser ? currentUser.username : 'none',
+        now: now.toISOString(),
+        nowLocal: now.toLocaleDateString('ko-KR'),
+        koreanTime: koreanTime.toISOString()
+    });
+    
+    // 저장된 날짜가 없으면 오늘 날짜로 초기화
+    if (!savedLastDate) {
+        console.log('📅 저장된 날짜 없음, 오늘 날짜로 초기화');
+        lastDateCheck = currentDate;
+        localStorage.setItem('jtSchoolLastDateCheck', currentDate);
+        return;
+    }
+    
+    if (savedLastDate !== currentDate) {
         // 날짜가 변경되었음
+        console.log('🚨 날짜 변경 감지됨! handleDateChange 호출');
+        console.log('🚨 변경 전:', savedLastDate, '변경 후:', currentDate);
         handleDateChange(savedLastDate, currentDate);
+    } else {
+        console.log('✅ 날짜 변경 없음');
     }
     
     // 현재 날짜 저장
@@ -402,7 +551,13 @@ function checkDateChange() {
 
 // 날짜 변경 처리
 function handleDateChange(oldDate, newDate) {
-    console.log(`날짜가 변경되었습니다: ${oldDate} → ${newDate}`);
+    console.log(`🚨 날짜 변경 처리 시작: ${oldDate} → ${newDate}`);
+    console.log('현재 상태:', {
+        activeSubjectId,
+        subjectTimers,
+        dailyGoal,
+        sessionsCount: sessions.length
+    });
     
     // 어제 날짜 계산 - 정확한 계산으로 수정
     const yesterday = new Date(oldDate);
@@ -459,19 +614,51 @@ function handleDateChange(oldDate, newDate) {
             subject.totalTime += subjectTimers[subject.name];
             
             // 타이머 리셋
+            console.log(`⏰ ${subject.name} 타이머 리셋:`, { before: subjectTimers[subject.name] });
             subjectTimers[subject.name] = 0;
+            console.log(`⏰ ${subject.name} 타이머 리셋 완료:`, { after: subjectTimers[subject.name] });
         }
     });
+    
+    // 모든 타이머를 0으로 초기화 (새로운 하루 시작)
+    console.log('🔄 새로운 하루 시작 - 타이머 초기화');
+    Object.keys(subjectTimers).forEach(subjectName => {
+        console.log(`🔄 ${subjectName} 타이머 초기화:`, { before: subjectTimers[subjectName] });
+        subjectTimers[subjectName] = 0;
+        console.log(`🔄 ${subjectName} 타이머 초기화 완료:`, { after: subjectTimers[subjectName] });
+    });
+    console.log('🔄 모든 타이머 초기화 완료:', subjectTimers);
+    
+    // 일일 목표 시간 초기화
+    console.log('🎯 일일 목표 초기화:', { before: dailyGoal });
+    dailyGoal = 0;
+    console.log('🎯 일일 목표 초기화 완료:', { after: dailyGoal });
+    
+    // 일일 목표 입력 필드 초기화
+    const goalHoursInput = document.getElementById('daily-goal-hours');
+    const goalMinutesInput = document.getElementById('daily-goal-minutes');
+    if (goalHoursInput) {
+        goalHoursInput.value = '';
+        console.log('🎯 목표 시간 입력 필드 초기화');
+    }
+    if (goalMinutesInput) {
+        goalMinutesInput.value = '';
+        console.log('🎯 목표 분 입력 필드 초기화');
+    }
     
     // 데이터 저장
     if (currentUser) {
         saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
     }
     
-    // UI 업데이트
-    updateStats();
-    updateSubjectTimers();
+    // 세션 데이터 삭제 (자정 초기화)
+    clearTimerSession();
+    
+    // UI 업데이트 (순서 중요!)
+    updateSubjectTimers();  // 먼저 타이머 UI 업데이트
+    updateStats();          // 그 다음 통계 업데이트
     updateTotalStudyTime();
+    updateDailyGoalProgress();
     renderTagHeatmaps();
     renderSubjectHeatmaps();
     
@@ -479,21 +666,254 @@ function handleDateChange(oldDate, newDate) {
     showToast('새로운 하루가 시작되었습니다! 어제의 학습 기록이 저장되었습니다. 🌅', 'info');
 }
 
+// 수동 날짜 변경 테스트 함수 (개발용)
+function testDateChange() {
+    console.log('🧪 수동 날짜 변경 테스트 시작');
+    
+    // 현재 상태 확인
+    console.log('테스트 전 상태:', {
+        dailyGoal: dailyGoal,
+        subjectTimers: subjectTimers,
+        sessions: sessions.length,
+        activeSubjectId: activeSubjectId
+    });
+    
+    // 어제 날짜로 설정
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    console.log('어제 날짜 설정:', yesterdayStr);
+    
+    // localStorage에 어제 날짜 저장
+    localStorage.setItem('jtSchoolLastDateCheck', yesterdayStr);
+    
+    // 현재 날짜로 변경 처리
+    const today = new Date().toISOString().split('T')[0];
+    console.log('현재 날짜:', today);
+    
+    // handleDateChange 직접 호출
+    handleDateChange(yesterdayStr, today);
+    
+    console.log('🧪 수동 날짜 변경 테스트 완료');
+    console.log('테스트 후 상태:', {
+        dailyGoal: dailyGoal,
+        subjectTimers: subjectTimers,
+        sessions: sessions.length,
+        activeSubjectId: activeSubjectId
+    });
+}
+
+// 강제 날짜 변경 함수 (더 강력한 버전)
+function forceDateChange() {
+    console.log('🔥 강제 날짜 변경 시작');
+    
+    // 현재 타이머에 시간 추가 (테스트용)
+    if (subjects.length > 0) {
+        const firstSubject = subjects[0];
+        subjectTimers[firstSubject.name] = 3600; // 1시간 추가
+        console.log('테스트용 시간 추가:', firstSubject.name, subjectTimers[firstSubject.name]);
+    }
+    
+    // 일일 목표 설정 (테스트용)
+    dailyGoal = 7200; // 2시간
+    console.log('테스트용 일일 목표 설정:', dailyGoal);
+    
+    // 어제 날짜로 설정
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    // localStorage에 어제 날짜 저장
+    localStorage.setItem('jtSchoolLastDateCheck', yesterdayStr);
+    
+    // 현재 날짜로 변경 처리
+    const today = new Date().toISOString().split('T')[0];
+    handleDateChange(yesterdayStr, today);
+    
+    console.log('🔥 강제 날짜 변경 완료');
+}
+
+// 실제 컴퓨터 시간으로 날짜 변경 시뮬레이션
+function simulateDateChange() {
+    console.log('🕐 실제 시간으로 날짜 변경 시뮬레이션');
+    
+    // 현재 시간 확인
+    const now = new Date();
+    console.log('현재 시간:', now.toISOString());
+    console.log('현재 날짜:', now.toISOString().split('T')[0]);
+    
+    // 어제 날짜로 localStorage 설정
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    console.log('어제 날짜 설정:', yesterdayStr);
+    localStorage.setItem('jtSchoolLastDateCheck', yesterdayStr);
+    
+    // checkDateChange 함수 호출 (실제 로직 사용)
+    console.log('checkDateChange 함수 호출...');
+    checkDateChange();
+    
+    console.log('🕐 시뮬레이션 완료');
+}
+
+// 현재 상태 확인 함수
+function checkCurrentState() {
+    console.log('📊 현재 상태 확인:');
+    console.log('사용자:', currentUser ? currentUser.username : '없음');
+    console.log('일일 목표:', dailyGoal, '초');
+    console.log('과목 타이머:', subjectTimers);
+    console.log('세션 수:', sessions.length);
+    console.log('활성 과목 ID:', activeSubjectId);
+    console.log('저장된 날짜:', localStorage.getItem('jtSchoolLastDateCheck'));
+    console.log('현재 날짜:', new Date().toISOString().split('T')[0]);
+    
+    // 오늘 합계 계산
+    const today = new Date().toISOString().split('T')[0];
+    const todaySessions = sessions.filter(s => s.date === today);
+    const todaySessionsTotal = todaySessions.reduce((sum, s) => sum + s.duration, 0);
+    const todaySubjectTimersTotal = Object.values(subjectTimers).reduce((sum, time) => sum + time, 0);
+    const totalToday = todaySessionsTotal + todaySubjectTimersTotal;
+    
+    console.log('📊 오늘 합계 계산:', {
+        today: today,
+        todaySessions: todaySessions.length,
+        todaySessionsTotal: todaySessionsTotal,
+        todaySubjectTimersTotal: todaySubjectTimersTotal,
+        totalToday: totalToday
+    });
+}
+
+// 강제 초기화 함수 (타이머만 초기화, 기록은 유지)
+function forceReset() {
+    console.log('🔄 타이머 초기화 시작 (기록은 유지)');
+    
+    // 모든 타이머 초기화
+    Object.keys(subjectTimers).forEach(subjectName => {
+        console.log(`🔄 ${subjectName} 타이머 초기화:`, { before: subjectTimers[subjectName] });
+        subjectTimers[subjectName] = 0;
+        console.log(`🔄 ${subjectName} 타이머 초기화 완료:`, { after: subjectTimers[subjectName] });
+    });
+    
+    // 일일 목표 초기화
+    console.log('🎯 일일 목표 초기화:', { before: dailyGoal });
+    dailyGoal = 0;
+    console.log('🎯 일일 목표 초기화 완료:', { after: dailyGoal });
+    
+    // 활성 타이머 중지
+    if (subjectTimersInterval) {
+        clearInterval(subjectTimersInterval);
+        subjectTimersInterval = null;
+    }
+    activeSubjectId = null;
+    
+    // 목표 입력 필드 초기화
+    const goalHoursInput = document.getElementById('daily-goal-hours');
+    const goalMinutesInput = document.getElementById('daily-goal-minutes');
+    if (goalHoursInput) goalHoursInput.value = '';
+    if (goalMinutesInput) goalMinutesInput.value = '';
+    
+    // UI 업데이트
+    console.log('🔄 UI 업데이트 시작');
+    updateSubjectTimers();
+    updateStats();
+    updateTotalStudyTime();
+    updateDailyGoalProgress();
+    
+    console.log('🔄 타이머 초기화 완료 (기록은 유지됨)');
+    checkCurrentState();
+}
+
+// 즉시 초기화 함수 (가장 강력한 버전)
+function immediateReset() {
+    console.log('⚡ 즉시 초기화 시작');
+    
+    // 모든 타이머를 0으로 설정
+    for (let subjectName in subjectTimers) {
+        subjectTimers[subjectName] = 0;
+    }
+    
+    // 일일 목표 0으로 설정
+    dailyGoal = 0;
+    
+    // 활성 타이머 중지
+    if (subjectTimersInterval) {
+        clearInterval(subjectTimersInterval);
+        subjectTimersInterval = null;
+    }
+    activeSubjectId = null;
+    
+    // 즉시 UI 업데이트
+    const todayTotalSpan = document.getElementById('today-total');
+    if (todayTotalSpan) {
+        todayTotalSpan.textContent = '00:00:00';
+        console.log('⚡ 오늘 합계 UI 즉시 초기화: 00:00:00');
+    }
+    
+    // 목표 입력 필드 초기화
+    const goalHoursInput = document.getElementById('daily-goal-hours');
+    const goalMinutesInput = document.getElementById('daily-goal-minutes');
+    if (goalHoursInput) goalHoursInput.value = '';
+    if (goalMinutesInput) goalMinutesInput.value = '';
+    
+    console.log('⚡ 즉시 초기화 완료');
+    console.log('⚡ 현재 상태:', {
+        subjectTimers: subjectTimers,
+        dailyGoal: dailyGoal,
+        activeSubjectId: activeSubjectId
+    });
+}
+
+// 강제 날짜 변경 함수 (실제 날짜로)
+function forceDateChangeNow() {
+    console.log('🔥 강제 날짜 변경 시작 (실제 날짜)');
+    
+    // 현재 실제 날짜 확인
+    const now = new Date();
+    const realToday = now.toISOString().split('T')[0];
+    const realTodayLocal = now.toLocaleDateString('ko-KR');
+    
+    console.log('🔥 실제 날짜:', realToday, realTodayLocal);
+    
+    // 어제 날짜로 localStorage 설정
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    console.log('🔥 어제 날짜 설정:', yesterdayStr);
+    localStorage.setItem('jtSchoolLastDateCheck', yesterdayStr);
+    
+    // checkDateChange 함수 호출
+    console.log('🔥 checkDateChange 함수 호출...');
+    checkDateChange();
+    
+    console.log('🔥 강제 날짜 변경 완료');
+}
+
+// 전역에서 테스트 함수 사용 가능하도록 설정
+window.testDateChange = testDateChange;
+window.forceDateChange = forceDateChange;
+window.simulateDateChange = simulateDateChange;
+window.checkCurrentState = checkCurrentState;
+window.forceReset = forceReset;
+window.immediateReset = immediateReset;
+window.forceDateChangeNow = forceDateChangeNow;
+
 // 이벤트 리스너 설정
 function setupEventListeners() {
     // 휴식 버튼
     const restBtn = document.getElementById('rest-btn');
     if (restBtn) {
+        restBtn.removeEventListener('click', pauseAllSubjectTimers);
         restBtn.addEventListener('click', pauseAllSubjectTimers);
     }
     
     // 과목 생성 버튼
     const createSubjectBtn = document.getElementById('create-subject-btn');
     if (createSubjectBtn) {
-        createSubjectBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            createNewSubject();
-        });
+        createSubjectBtn.removeEventListener('click', handleCreateSubject);
+        createSubjectBtn.addEventListener('click', handleCreateSubject);
     }
     
     // 과목 타이머 버튼들 (이벤트 위임)
@@ -519,13 +939,26 @@ function setupEventListeners() {
     }
 }
 
+// 과목 생성 핸들러
+function handleCreateSubject(e) {
+    e.preventDefault();
+    createNewSubject();
+}
+
 // 새로운 과목 생성
 function createNewSubject() {
     const nameInput = document.getElementById('new-subject-name');
+    const tagSelect = document.getElementById('new-subject-tag');
     const name = nameInput.value.trim();
+    const tag = tagSelect.value;
     
     if (!name) {
         showToast('과목명을 입력해주세요.', 'error');
+        return;
+    }
+    
+    if (!tag) {
+        showToast('태그를 선택해주세요.', 'error');
         return;
     }
     
@@ -535,9 +968,15 @@ function createNewSubject() {
         return;
     }
     
+    // 색상 자동 할당
+    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+    const color = colors[subjects.length % colors.length];
+    
     const newSubject = {
         id: Date.now(),
         name: name,
+        tag: tag,
+        color: color,
         totalTime: 0,
         createdAt: new Date().toISOString()
     };
@@ -551,18 +990,22 @@ function createNewSubject() {
     saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
     
     // UI 업데이트
-    updateSubjectList();
     updateSubjectTimers();
     
     // 입력 필드 초기화
     nameInput.value = '';
+    tagSelect.value = '';
     
     showToast(`"${name}" 과목이 추가되었습니다! 📚`, 'success');
 }
 
 // 통계 업데이트
 function updateStats() {
-    const today = new Date().toISOString().split('T')[0];
+    // 한국 시간 기준으로 오늘 날짜 계산
+    const now = new Date();
+    const koreanTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    const today = koreanTime.toISOString().split('T')[0];
+    
     const todaySessions = sessions.filter(s => s.date === today);
     const todaySessionsTotal = todaySessions.reduce((sum, s) => sum + s.duration, 0);
     
@@ -570,10 +1013,21 @@ function updateStats() {
     const todaySubjectTimersTotal = Object.values(subjectTimers).reduce((sum, time) => sum + time, 0);
     const totalToday = todaySessionsTotal + todaySubjectTimersTotal;
     
+    console.log('📊 통계 업데이트 (한국 시간 기준):', {
+        today: today,
+        todaySessions: todaySessions.length,
+        todaySessionsTotal: todaySessionsTotal,
+        todaySubjectTimersTotal: todaySubjectTimersTotal,
+        totalToday: totalToday,
+        subjectTimers: subjectTimers,
+        koreanTime: koreanTime.toISOString()
+    });
+    
     // 오늘 합계 업데이트
     const todayTotalSpan = document.getElementById('today-total');
     if (todayTotalSpan) {
         todayTotalSpan.textContent = formatTime(totalToday);
+        console.log('📊 오늘 합계 UI 업데이트:', formatTime(totalToday));
     }
     
     // 주간/월간 통계 업데이트
@@ -586,20 +1040,44 @@ function updateStats() {
 // 주간/월간 통계
 function updateWeeklyMonthlyStats() {
     const now = new Date();
-    const weekStart = new Date(now.getTime() - (now.getDay() * 24 * 60 * 60 * 1000));
+    
+    // 이번 주 시작 (월요일 00:00:00)
+    const weekStart = new Date(now);
+    const dayOfWeek = now.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 일요일이면 6일 전, 아니면 월요일까지의 일수
+    weekStart.setDate(now.getDate() - daysToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    
+    // 이번 달 시작 (1일 00:00:00)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     
-    const weeklySessions = sessions.filter(s => new Date(s.date) >= weekStart);
-    const monthlySessions = sessions.filter(s => new Date(s.date) >= monthStart);
+    console.log('통계 계산:', {
+        now: now.toISOString(),
+        weekStart: weekStart.toISOString(),
+        monthStart: monthStart.toISOString()
+    });
+    
+    const weeklySessions = sessions.filter(s => {
+        const sessionDate = new Date(s.date);
+        return sessionDate >= weekStart;
+    });
+    
+    const monthlySessions = sessions.filter(s => {
+        const sessionDate = new Date(s.date);
+        return sessionDate >= monthStart;
+    });
     
     const weeklySessionsTime = weeklySessions.reduce((sum, s) => sum + s.duration, 0);
     const monthlySessionsTime = monthlySessions.reduce((sum, s) => sum + s.duration, 0);
     
-    // 현재 실행 중인 과목들의 시간도 포함
+    // 현재 실행 중인 과목들의 시간도 포함 (오늘만)
+    const today = new Date().toISOString().split('T')[0];
+    const todaySessions = sessions.filter(s => s.date === today);
+    const todaySessionsTime = todaySessions.reduce((sum, s) => sum + s.duration, 0);
     const subjectTimersTotal = Object.values(subjectTimers).reduce((sum, time) => sum + time, 0);
     
-    const weeklyTime = weeklySessionsTime + subjectTimersTotal;
-    const monthlyTime = monthlySessionsTime + subjectTimersTotal;
+    const weeklyTime = weeklySessionsTime + (todaySessionsTime + subjectTimersTotal);
+    const monthlyTime = monthlySessionsTime + (todaySessionsTime + subjectTimersTotal);
     
     // 주간 합계 업데이트
     const weeklyTotalSpan = document.getElementById('weekly-total');
@@ -626,45 +1104,73 @@ function updateWeeklyMonthlyStats() {
     }
 }
 
-// 연속 학습일 계산
+// 연속 학습일 계산 (30분 이상 공부한 날만 인정)
 function calculateStreak() {
     if (sessions.length === 0) return 0;
     
-    const today = new Date();
+    // 한국 시간 기준으로 오늘 날짜 계산
+    const now = new Date();
+    const koreanTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    const today = new Date(koreanTime);
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0];
     
-    // 고유한 날짜만 추출하고 정렬
-    const uniqueDates = [...new Set(sessions.map(s => s.date))].sort();
+    // 날짜별 총 공부 시간 계산 (30분 이상인 날만)
+    const dailyStudyTime = {};
+    sessions.forEach(session => {
+        if (!dailyStudyTime[session.date]) {
+            dailyStudyTime[session.date] = 0;
+        }
+        dailyStudyTime[session.date] += session.duration;
+    });
     
-    if (uniqueDates.length === 0) return 0;
+    // 오늘의 과목별 타이머도 포함
+    if (!dailyStudyTime[todayStr]) {
+        dailyStudyTime[todayStr] = 0;
+    }
+    dailyStudyTime[todayStr] += Object.values(subjectTimers).reduce((sum, time) => sum + time, 0);
     
-    // 가장 최근 날짜
-    const latestDate = uniqueDates[uniqueDates.length - 1];
+    // 1분 이상 공부한 날짜들만 필터링
+    const validStudyDates = Object.keys(dailyStudyTime)
+        .filter(date => dailyStudyTime[date] >= 60) // 1분 = 60초
+        .sort();
     
-    // 오늘 학습했는지 확인
-    const hasStudiedToday = latestDate === todayStr;
+    if (validStudyDates.length === 0) return 0;
+    
+    // 오늘 1분 이상 공부했는지 확인
+    const todayStudyTime = dailyStudyTime[todayStr] || 0;
+    const hasStudiedToday = todayStudyTime >= 60;
     
     let streak = 0;
     let currentDate = new Date(today);
     
-    // 오늘 학습하지 않았다면 어제부터 계산
+    // 오늘 공부하지 않았다면 어제부터 계산
     if (!hasStudiedToday) {
         currentDate.setDate(currentDate.getDate() - 1);
     }
     
-    // 연속된 날짜 계산
+    // 연속된 날짜 계산 (30분 이상 공부한 날만)
     for (let i = 0; i < 365; i++) { // 최대 1년
         const checkDate = new Date(currentDate);
         checkDate.setDate(currentDate.getDate() - i);
         const checkDateStr = checkDate.toISOString().split('T')[0];
         
-        if (uniqueDates.includes(checkDateStr)) {
-            streak++;
-        } else {
-            break;
-        }
+                // 해당 날짜에 1분 이상 공부했는지 확인
+                const studyTime = dailyStudyTime[checkDateStr] || 0;
+                if (studyTime >= 60) {
+                    streak++;
+                } else {
+                    break;
+                }
     }
+    
+    console.log('연속 학습일 계산 (1분 이상):', {
+        validStudyDates: validStudyDates.length,
+        todayStudyTime: todayStudyTime,
+        hasStudiedToday: hasStudiedToday,
+        streak: streak,
+        dailyStudyTime: dailyStudyTime
+    });
     
     return streak;
 }
@@ -774,30 +1280,48 @@ function setupChatBot() {
     }
     
     quickQButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const question = btn.getAttribute('data-question');
             addUserMessage(question);
-            setTimeout(() => {
-                const response = getChatResponse(question);
+            
+            // 로딩 메시지 표시
+            const loadingId = addLoadingMessage();
+            
+            try {
+                const response = await getChatResponse(question);
+                removeLoadingMessage(loadingId);
                 addCoachMessage(response);
-            }, 500);
+            } catch (error) {
+                removeLoadingMessage(loadingId);
+                addCoachMessage('죄송해요, 잠시 문제가 생겼어요. 다시 시도해주세요! 🐕');
+                console.error('채팅 응답 오류:', error);
+            }
         });
     });
     
     presetButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const question = btn.getAttribute('data-question');
             addUserMessage(question);
-            setTimeout(() => {
-                const response = getChatResponse(question);
+            
+            // 로딩 메시지 표시
+            const loadingId = addLoadingMessage();
+            
+            try {
+                const response = await getChatResponse(question);
+                removeLoadingMessage(loadingId);
                 addCoachMessage(response);
-            }, 500);
+            } catch (error) {
+                removeLoadingMessage(loadingId);
+                addCoachMessage('죄송해요, 잠시 문제가 생겼어요. 다시 시도해주세요! 🐕');
+                console.error('채팅 응답 오류:', error);
+            }
         });
     });
 }
 
 // 메시지 전송
-function sendMessage() {
+async function sendMessage() {
     const input = document.getElementById('chat-input');
     const message = input.value.trim();
     
@@ -805,10 +1329,18 @@ function sendMessage() {
         addUserMessage(message);
         input.value = '';
         
-        setTimeout(() => {
-            const response = getChatResponse(message);
+        // 로딩 메시지 표시
+        const loadingId = addLoadingMessage();
+        
+        try {
+            const response = await getChatResponse(message);
+            removeLoadingMessage(loadingId);
             addCoachMessage(response);
-        }, 500);
+        } catch (error) {
+            removeLoadingMessage(loadingId);
+            addCoachMessage('죄송해요, 잠시 문제가 생겼어요. 다시 시도해주세요! 🐕');
+            console.error('채팅 응답 오류:', error);
+        }
     }
 }
 
@@ -836,12 +1368,105 @@ function addCoachMessage(message) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// 챗봇 응답 생성
-function getChatResponse(message) {
+// 로딩 메시지 추가
+function addLoadingMessage() {
+    const chatMessages = document.getElementById('chat-messages');
+    if (!chatMessages) return null;
+    
+    const loadingId = 'loading-' + Date.now();
+    const messageDiv = document.createElement('div');
+    messageDiv.id = loadingId;
+    messageDiv.className = 'message coach-message loading-message';
+    messageDiv.innerHTML = `
+        <div class="loading-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+        <span class="loading-text">코기가 생각 중이에요...</span>
+    `;
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    return loadingId;
+}
+
+// 로딩 메시지 제거
+function removeLoadingMessage(loadingId) {
+    if (!loadingId) return;
+    
+    const loadingElement = document.getElementById(loadingId);
+    if (loadingElement) {
+        loadingElement.remove();
+    }
+}
+
+// 제미나이 API 호출 함수
+async function callGeminiAPI(message) {
+    try {
+        const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [{
+                        text: `당신은 JT SCHOOL의 글쓰기 코치입니다. 🐕
+
+사용자 프로필:
+- 중고등학생 대상
+- 글쓰기 초보자부터 고급자까지
+- 창의적 글쓰기와 논술 모두 지원
+
+당신의 역할:
+1. 친근하고 격려하는 톤으로 응답
+2. 구체적이고 실용적인 조언 제공
+3. 단계별 가이드 제시
+4. 예시와 비유를 활용한 설명
+5. 한국어로 응답
+
+사용자 질문: ${message}
+
+위 질문에 대해 글쓰기 코치로서 도움이 되는 답변을 해주세요. 200자 이내로 간결하게 답변해주세요.`
+                    }]
+                }],
+                generationConfig: {
+                    temperature: 0.7,
+                    topK: 40,
+                    topP: 0.95,
+                    maxOutputTokens: 200,
+                }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`API 호출 실패: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+            return data.candidates[0].content.parts[0].text;
+        } else {
+            throw new Error('API 응답 형식 오류');
+        }
+    } catch (error) {
+        console.error('제미나이 API 호출 오류:', error);
+        return getFallbackResponse(message);
+    }
+}
+
+// 폴백 응답 (API 실패 시)
+function getFallbackResponse(message) {
     const responses = {
         '서술과 묘사의 차이점': '서술은 "무엇을 했는가"를 말하고, 묘사는 "어떻게 보이는가"를 말합니다. 서술은 사건의 진행을, 묘사는 감각적 경험을 전달해요.',
         '일상 기반 비유': '일상에서 흔히 볼 수 있는 것들을 활용해서 복잡한 개념을 설명하는 방법이에요. 예를 들어, "인터넷은 도서관과 같다"처럼 익숙한 것을 통해 새로운 것을 이해시키는 거죠.',
         '글쓰기 공포': '글쓰기 공포는 누구나 겪는 자연스러운 현상이에요. 완벽하게 쓰려고 하지 말고, 일단 쓰는 것부터 시작하세요.',
+        '장면': '장면부터 시작하려면 구체적인 상황을 떠올려보세요. "어느 날", "그때" 같은 시간 표현으로 시작하면 자연스러워요.',
+        '감정': '감정을 고르려면 먼저 자신의 마음을 살펴보세요. 기쁨, 슬픔, 분노, 두려움 중 어떤 감정이 가장 강한가요?',
+        '비유': '비유는 익숙한 것과 낯선 것을 연결하는 거예요. "마음이 무거워진다"처럼 구체적인 느낌을 표현해보세요.',
+        '독서 메모': '독서 메모는 인상 깊은 문장을 적고, 왜 인상 깊었는지 생각을 써보세요. 나중에 글쓰기 소재로 활용할 수 있어요.',
         'default': '좋은 질문이네요! 글쓰기는 연습이 가장 중요해요. 매일 조금씩이라도 쓰는 습관을 들여보세요. 🐕'
     };
     
@@ -855,6 +1480,17 @@ function getChatResponse(message) {
     return responses.default;
 }
 
+// 챗봇 응답 생성 (제미나이 API 사용)
+async function getChatResponse(message) {
+    // API 키가 설정되어 있으면 제미나이 API 사용
+    if (GEMINI_API_KEY && GEMINI_API_KEY !== 'AIzaSyBvQZvQZvQZvQZvQZvQZvQZvQZvQZvQZvQ') {
+        return await callGeminiAPI(message);
+    } else {
+        // API 키가 없으면 폴백 응답 사용
+        return getFallbackResponse(message);
+    }
+}
+
 // 설정 기능
 function setupSettings() {
     console.log('설정 기능 초기화 시작...');
@@ -865,13 +1501,16 @@ function setupSettings() {
     const clearBtn = document.getElementById('clear-data');
     const logoutBtn = document.getElementById('logout-btn');
     const themeOptions = document.querySelectorAll('input[name="theme"]');
+    const saveApiKeyBtn = document.getElementById('save-api-key');
+    const apiKeyInput = document.getElementById('gemini-api-key');
     
     console.log('찾은 버튼들:', {
         exportBtn: !!exportBtn,
         importBtn: !!importBtn,
         importFile: !!importFile,
         clearBtn: !!clearBtn,
-        logoutBtn: !!logoutBtn
+        logoutBtn: !!logoutBtn,
+        saveApiKeyBtn: !!saveApiKeyBtn
     });
     
     if (exportBtn) {
@@ -902,6 +1541,12 @@ function setupSettings() {
     themeOptions.forEach(option => {
         option.addEventListener('change', changeTheme);
     });
+    
+    // API 키 저장 버튼
+    if (saveApiKeyBtn) {
+        saveApiKeyBtn.addEventListener('click', saveApiKey);
+        console.log('API 키 저장 버튼 이벤트 리스너 설정 완료');
+    }
     
     // 사용자 정보 표시
     updateUserDisplay();
@@ -938,12 +1583,16 @@ function logout() {
         localStorage.removeItem('jtSchoolUser');
         console.log('사용자 정보 제거 완료');
         
+        // 세션 데이터 삭제 - 임시 비활성화
+        // clearTimerSession();
+        
         // 전역 변수 초기화
         currentUser = null;
         subjects = [];
         sessions = [];
         dailyGoal = 0;
         subjectTimers = {};
+        isPaused = false;
         
         // 타이머 정리
         if (subjectTimersInterval) {
@@ -961,6 +1610,32 @@ function logout() {
         console.error('로그아웃 중 오류 발생:', error);
         showToast('로그아웃 중 오류가 발생했습니다.', 'error');
     }
+}
+
+// API 키 저장
+function saveApiKey() {
+    const apiKeyInput = document.getElementById('gemini-api-key');
+    const apiKey = apiKeyInput.value.trim();
+    
+    if (!apiKey) {
+        showToast('API 키를 입력해주세요.', 'error');
+        return;
+    }
+    
+    // API 키 형식 검증 (기본적인 검증)
+    if (!apiKey.startsWith('AIza')) {
+        showToast('올바른 제미나이 API 키 형식이 아닙니다.', 'error');
+        return;
+    }
+    
+    // API 키 저장
+    localStorage.setItem('jtSchoolGeminiAPIKey', apiKey);
+    GEMINI_API_KEY = apiKey;
+    
+    showToast('API 키가 저장되었습니다! 이제 더 정확한 글쓰기 조언을 받을 수 있어요. 🐕', 'success');
+    
+    // 입력 필드 초기화
+    apiKeyInput.value = '';
 }
 
 // 설정 저장
@@ -987,6 +1662,16 @@ function loadSettings() {
             }
         } catch (error) {
             console.error('설정 로드 실패:', error);
+        }
+    }
+    
+    // API 키 로드
+    const savedApiKey = localStorage.getItem('jtSchoolGeminiAPIKey');
+    if (savedApiKey && savedApiKey !== 'AIzaSyBvQZvQZvQZvQZvQZvQZvQZvQZvQZvQZvQ') {
+        GEMINI_API_KEY = savedApiKey;
+        const apiKeyInput = document.getElementById('gemini-api-key');
+        if (apiKeyInput) {
+            apiKeyInput.placeholder = 'API 키가 설정되어 있습니다';
         }
     }
 }
@@ -1095,33 +1780,20 @@ function changeTheme(event) {
 
 // 데이터 로드 (사용자별 데이터에서 처리됨)
 function loadData() {
-    // 사용자별 데이터는 loadUserData() 함수에서 처리됨
+    // 사용자별 데이터 로드
+    if (currentUser) {
+        loadUserData();
+    }
 }
 
 // 페이지 언로드 시 데이터 저장
 window.addEventListener('beforeunload', function() {
-    if (currentUser && activeSubjectId) {
-        // 활성 타이머 데이터를 sessions에 저장
-        const subject = subjects.find(s => s.id === activeSubjectId);
-        if (subject && subjectTimers[subject.name] > 0) {
-            const session = {
-                id: Date.now(),
-                subjectId: activeSubjectId,
-                subjectName: subject.name,
-                duration: subjectTimers[subject.name],
-                startTime: new Date(Date.now() - (subjectTimers[subject.name] * 1000)).toISOString(),
-                endTime: new Date().toISOString(),
-                date: new Date().toISOString().split('T')[0]
-            };
-            
-            sessions.push(session);
-            
-            // 과목 총 시간 업데이트
-            subject.totalTime += subjectTimers[subject.name];
-            
-            // 타이머 초기화
-            subjectTimers[subject.name] = 0;
-        }
+    if (currentUser) {
+        // 세션 상태 저장 (페이지 종료 시) - 임시 비활성화
+        // saveTimerSession();
+        
+        // 활성 타이머가 있다면 sessions에 저장하지 않고 세션으로 유지
+        // (새로고침 시 복원을 위해)
         
         // 데이터 저장
         saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
@@ -1153,7 +1825,7 @@ function updateSubjectTimers() {
     
     card.innerHTML = `
             <div class="subject-header">
-                <div class="subject-name" style="color: ${subject.color}">${subject.name}</div>
+                <div class="subject-name" style="color: ${subject.color || '#333'}">${subject.name}</div>
                 <div class="subject-tag">${subject.tag || '기타'}</div>
         </div>
             <div class="subject-time-display">
@@ -1188,8 +1860,8 @@ function renderTagHeatmaps() {
         const cellSize = isMobile ? 12 : 15;
         const gap = isMobile ? 2 : 3;
 
-        // 요일 레이블 추가
-        const weekdays = ['', '월', '화', '수', '목', '금', '토', '일'];
+        // 요일 레이블 추가 (첫 번째 행은 빈 공간)
+        const weekdays = ['월', '화', '수', '목', '금', '토', '일'];
         weekdays.forEach((day, index) => {
             const label = document.createElement('div');
             label.className = 'weekday-label';
@@ -1235,8 +1907,8 @@ function renderTagHeatmaps() {
             startDate.setDate(startDate.getDate() - 1);
         }
 
-        // 270개 박스를 유지하기 위한 주차 수 계산 (39주)
-        const maxWeeks = 39;
+        // 52주 (1년) 박스를 유지하기 위한 주차 수 계산
+        const maxWeeks = 52;
         
         // 각 주차별로 7일씩 박스 생성
         for (let week = 0; week < maxWeeks; week++) {
@@ -1378,7 +2050,7 @@ function renderSubjectHeatmaps() {
         emptyCell.style.gridColumn = '1';
         monthLabels.appendChild(emptyCell);
         
-        // 270개 박스에 맞는 월 레이블 생성
+        // 52주에 맞는 월 레이블 생성
         let lastMonth = -1; // 월 변경 감지를 위한 변수
         for (let week = 0; week < maxWeeks; week++) {
             const weekStartDate = new Date(startDate);
@@ -1397,8 +2069,8 @@ function renderSubjectHeatmaps() {
         const grid = document.createElement('div');
         grid.className = 'heatmap-grid';
 
-        // 요일 레이블 추가
-        const weekdays = ['', '월', '화', '수', '목', '금', '토', '일'];
+        // 요일 레이블 추가 (첫 번째 행은 빈 공간)
+        const weekdays = ['월', '화', '수', '목', '금', '토', '일'];
         weekdays.forEach((day, index) => {
             const label = document.createElement('div');
             label.className = 'weekday-label';
@@ -1445,8 +2117,8 @@ function renderSubjectHeatmaps() {
             startDate.setDate(startDate.getDate() - 1);
         }
 
-        // 270개 박스를 유지하기 위한 주차 수 계산 (최대 39주)
-        const maxWeeks = 39;
+        // 52주 (1년) 박스를 유지하기 위한 주차 수 계산
+        const maxWeeks = 52;
         const actualWeeks = Math.ceil((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 7));
         const totalWeeks = Math.min(actualWeeks, maxWeeks);
         
@@ -1555,22 +2227,37 @@ function updateTotalStudyTime() {
 
 // 일일 목표 설정
 function setupDailyGoal() {
-    const goalInput = document.getElementById('daily-goal-input');
-    const goalBtn = document.getElementById('daily-goal-btn');
+    const goalHoursInput = document.getElementById('daily-goal-hours');
+    const goalMinutesInput = document.getElementById('daily-goal-minutes');
+    const goalBtn = document.getElementById('set-daily-goal');
     
-    if (goalInput && goalBtn) {
-        goalBtn.addEventListener('click', function() {
-            const goal = parseInt(goalInput.value);
-            if (goal >= 0) {
-                dailyGoal = goal;
-                saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
-                updateStats();
-                showToast(`일일 목표가 ${formatTime(goal)}로 설정되었습니다! 🎯`, 'success');
-                goalInput.value = '';
-            } else {
-                showToast('올바른 목표 시간을 입력해주세요.', 'error');
-            }
-        });
+    if (goalHoursInput && goalMinutesInput && goalBtn) {
+        // 기존 이벤트 리스너 제거
+        goalBtn.removeEventListener('click', handleDailyGoalSet);
+        
+        // 새로운 이벤트 리스너 추가
+        goalBtn.addEventListener('click', handleDailyGoalSet);
+    }
+}
+
+// 일일 목표 설정 핸들러
+function handleDailyGoalSet() {
+    const goalHoursInput = document.getElementById('daily-goal-hours');
+    const goalMinutesInput = document.getElementById('daily-goal-minutes');
+    
+    const hours = parseInt(goalHoursInput.value) || 0;
+    const minutes = parseInt(goalMinutesInput.value) || 0;
+    const totalSeconds = (hours * 3600) + (minutes * 60);
+    
+    if (totalSeconds >= 0) {
+        dailyGoal = totalSeconds;
+        saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
+        updateStats();
+        showToast(`일일 목표가 ${formatTime(totalSeconds)}로 설정되었습니다! 🎯`, 'success');
+        goalHoursInput.value = '';
+        goalMinutesInput.value = '';
+    } else {
+        showToast('올바른 목표 시간을 입력해주세요.', 'error');
     }
 }
 
@@ -1602,11 +2289,17 @@ function updateDailyGoalProgress() {
         const exceeded = todayTotal - dailyGoal;
         goalStatus.textContent = `🎉 목표 달성! +${formatTime(exceeded)}`;
         goalStatus.style.color = '#4CAF50';
-        } else {
+    } else {
         const remaining = dailyGoal - todayTotal;
         goalStatus.textContent = `${formatTime(todayTotal)} / ${formatTime(dailyGoal)} (${formatTime(remaining)} 남음)`;
         goalStatus.style.color = '#FF9800';
     }
+    
+    console.log('일일 목표 진행률:', {
+        todayTotal: todayTotal,
+        dailyGoal: dailyGoal,
+        progress: progress
+    });
 }
 
 // 과목별 개별 타이머 시작
@@ -1620,6 +2313,9 @@ function startSubjectTimer(subjectId) {
     const subject = subjects.find(s => s.id == subjectId);
     
     if (!subject) return;
+    
+    // 일시정지 상태 해제
+    isPaused = false;
     
     // 해당 과목의 타이머 시작
     if (subjectTimersInterval) {
@@ -1649,7 +2345,15 @@ function startSubjectTimer(subjectId) {
         if (currentUser) {
             saveUserStudyData(currentUser.id, { subjects, sessions, dailyGoal });
         }
+        
+        // 세션 상태 저장 (1분마다) - 임시 비활성화
+        // if (subjectTimers[subject.name] % 60 === 0) {
+        //     saveTimerSession();
+        // }
     }, 1000);
+    
+    // 세션 상태 즉시 저장 - 임시 비활성화
+    // saveTimerSession();
     
     // UI 업데이트
     updateSubjectTimers();
@@ -1660,6 +2364,12 @@ function startSubjectTimer(subjectId) {
 // 과목별 개별 타이머 일시정지
 function pauseSubjectTimer(subjectId) {
     if (activeSubjectId !== subjectId) return;
+    
+    // 일시정지 상태로 설정
+    isPaused = true;
+    
+    // 세션 상태 저장 (일시정지 상태로) - 임시 비활성화
+    // saveTimerSession();
     
     activeSubjectId = null;
     
@@ -1692,6 +2402,9 @@ function resetSubjectTimer(subjectId) {
     
     // 시간 초기화
     subjectTimers[subject.name] = 0;
+    
+    // 세션 데이터 삭제 (리셋 시) - 임시 비활성화
+    // clearTimerSession();
     
     // UI 업데이트
     updateSubjectTimers();
@@ -1743,6 +2456,12 @@ function deleteSubject(subjectId) {
 // 모든 과목 타이머 일시정지 (휴식 기능)
 function pauseAllSubjectTimers() {
     if (activeSubjectId) {
+        // 일시정지 상태로 설정
+        isPaused = true;
+        
+        // 세션 상태 저장 (일시정지 상태로) - 임시 비활성화
+        // saveTimerSession();
+        
         activeSubjectId = null;
         
         if (subjectTimersInterval) {
@@ -2235,6 +2954,7 @@ function showLoginScreen() {
     dailyGoal = 0;
     subjectTimers = {};
     activeSubjectId = null;
+    isPaused = false;
     
     // 타이머 정리
     if (subjectTimersInterval) {
